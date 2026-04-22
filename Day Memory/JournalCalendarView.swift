@@ -20,6 +20,11 @@ struct JournalCalendarView: View {
     @State private var showApplyError = false
     @State private var fallbackCountry: String = "NL"
 
+    private struct MonthLegendItem: Hashable {
+        let countryCode: String
+        let isWorking: Bool
+    }
+
     private var calendar: Calendar { .autoupdatingCurrent }
 
     var body: some View {
@@ -29,6 +34,7 @@ struct JournalCalendarView: View {
                     monthHeader
                     weekdaySymbolsRow
                     monthGrid
+                    monthColorLegend
                     weekActions
                 }
                 .padding(.horizontal, 16)
@@ -128,6 +134,29 @@ struct JournalCalendarView: View {
         }
     }
 
+    private var monthColorLegend: some View {
+        let codes = visibleCountryCodesInMonth()
+        let items = monthLegendItems(from: codes)
+        return Group {
+            if !items.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 140), spacing: 12)],
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        ForEach(items, id: \.self) { item in
+                            legendDot(
+                                color: countryDotColor(countryCode: item.countryCode, isWorking: item.isWorking),
+                                label: "\(item.countryCode) \(item.isWorking ? "working" : "non-working")"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func dayCell(_ day: Date) -> some View {
         let normalized = ModelValidation.startOfDay(day, calendar: calendar)
         let record = journalDays.first { ModelValidation.startOfDay($0.day, calendar: calendar) == normalized }
@@ -138,6 +167,7 @@ struct JournalCalendarView: View {
 
         let accentCountryLine = emphasizeCountryLine(forNormalizedDay: normalized, record: record)
         let workAwayFromEmployer = showsWorkAwayFromEmployer(normalizedDay: normalized, record: record)
+        let transitionStyle = transitionIndicatorStyle(forNormalizedDay: normalized, record: record)
 
         let todayStart = ModelValidation.startOfDay(Date(), calendar: calendar)
         let isPastDay = normalized < todayStart
@@ -155,11 +185,21 @@ struct JournalCalendarView: View {
                     Text("\(calendar.component(.day, from: day))")
                         .font(.body.weight(isToday ? .bold : .regular))
                     if let record, let countryLine = gridCountryLabel(for: record) {
-                        Text(countryLine)
-                            .font(.caption2.weight(accentCountryLine ? .semibold : .medium))
-                            .foregroundStyle(accentCountryLine ? Color.primary : Color.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                        VStack(spacing: 4) {
+                            Text(countryLine)
+                                .font(.caption2.weight(accentCountryLine ? .semibold : .medium))
+                                .foregroundStyle(accentCountryLine ? Color.primary : Color.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+
+                            HStack(spacing: 4) {
+                                ForEach(gridSegments(for: record), id: \.id) { segment in
+                                    Circle()
+                                        .fill(countryDotColor(countryCode: segment.countryCode, isWorking: segment.isWorking))
+                                        .frame(width: 6, height: 6)
+                                }
+                            }
+                        }
                     } else {
                         Circle()
                             .fill(Color.clear)
@@ -171,7 +211,7 @@ struct JournalCalendarView: View {
             .overlay(alignment: .leading) {
                 if accentCountryLine, record != nil {
                     RoundedRectangle(cornerRadius: 1, style: .continuous)
-                        .fill(Color.primary.opacity(0.22))
+                        .fill(transitionStyle)
                         .frame(width: 2)
                         .padding(.leading, 4)
                         .padding(.vertical, 10)
@@ -250,6 +290,59 @@ struct JournalCalendarView: View {
             return "\(first.countryCode)/\(second.countryCode)"
         }
         return first.countryCode
+    }
+
+    /// Presence segments shown as dot markers under the country label.
+    private func gridSegments(for record: JournalDay) -> [PresenceSegment] {
+        record.segments.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    /// Stable per-country hue: darker for working, lighter for non-working.
+    private func countryDotColor(countryCode: String, isWorking: Bool) -> Color {
+        let normalized = countryCode.uppercased()
+        // Brand-guided country palette for common locations.
+        let base: Color
+        switch normalized {
+        case "NL":
+            base = .green
+        case "AE":
+            base = .blue
+        case "ES":
+            base = .red
+        default:
+            // Deterministic fallback hue for other countries.
+            let hash = normalized.unicodeScalars.reduce(0) { acc, scalar in
+                ((acc * 31) &+ Int(scalar.value)) & 0x7fffffff
+            }
+            let hue = Double(hash % 360) / 360.0
+            base = Color(hue: hue, saturation: 0.62, brightness: 0.78)
+        }
+
+        return base.opacity(isWorking ? 0.95 : 0.45)
+    }
+
+    /// Vertical indicator style on country-change days:
+    /// - Single-country day: arriving segment color.
+    /// - Split day: gradient from departure segment to arrival segment.
+    private func transitionIndicatorStyle(forNormalizedDay _: Date, record: JournalDay?) -> AnyShapeStyle {
+        guard let record else { return AnyShapeStyle(Color.primary.opacity(0.22)) }
+        let sorted = record.segments.sorted { $0.sortOrder < $1.sortOrder }
+        guard let first = sorted.first else { return AnyShapeStyle(Color.primary.opacity(0.22)) }
+
+        if sorted.count >= 2 {
+            let second = sorted[1]
+            let depart = countryDotColor(countryCode: first.countryCode, isWorking: first.isWorking)
+            let arrive = countryDotColor(countryCode: second.countryCode, isWorking: second.isWorking)
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [depart, arrive],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        }
+
+        return AnyShapeStyle(countryDotColor(countryCode: first.countryCode, isWorking: first.isWorking))
     }
 
     /// Primary presence country for a day (first segment), or `nil` if unlogged.
@@ -337,6 +430,49 @@ struct JournalCalendarView: View {
             days.append(nil)
         }
         return days
+    }
+
+    private func visibleCountryCodesInMonth() -> [String] {
+        monthDates().reduce(into: Set<String>()) { acc, day in
+            let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+            guard let record = journalDays.first(where: { ModelValidation.startOfDay($0.day, calendar: calendar) == normalized }) else {
+                return
+            }
+            for segment in record.segments {
+                acc.insert(segment.countryCode.uppercased())
+            }
+        }
+        .sorted()
+    }
+
+    private func monthDates() -> [Date] {
+        guard let dayRange = calendar.range(of: .day, in: .month, for: visibleMonth),
+              let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: visibleMonth))
+        else { return [] }
+
+        return dayRange.compactMap { day in
+            calendar.date(byAdding: .day, value: day - 1, to: firstOfMonth)
+        }
+    }
+
+    private func monthLegendItems(from codes: [String]) -> [MonthLegendItem] {
+        codes.flatMap { code in
+            [
+                MonthLegendItem(countryCode: code, isWorking: true),
+                MonthLegendItem(countryCode: code, isWorking: false),
+            ]
+        }
+    }
+
+    private func legendDot(color: Color, label: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func applyWeekDefaults() {

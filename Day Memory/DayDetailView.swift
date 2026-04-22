@@ -32,6 +32,9 @@ struct DayDetailView: View {
 
     @State private var saveError: String?
     @State private var showSaveError = false
+    @State private var errorTitle = "Cannot save"
+    @State private var hasExistingEntry = false
+    @State private var showDeleteConfirmation = false
 
     private var calendar: Calendar { .autoupdatingCurrent }
 
@@ -99,6 +102,16 @@ struct DayDetailView: View {
                     }
                 }
             }
+
+            if hasExistingEntry {
+                Section {
+                    Button("Delete day entry", role: .destructive) {
+                        showDeleteConfirmation = true
+                    }
+                } footer: {
+                    Text("Removes this day's journal data and returns it to a fresh state.")
+                }
+            }
         }
         .navigationTitle("Day")
         .navigationBarTitleDisplayMode(.inline)
@@ -111,7 +124,13 @@ struct DayDetailView: View {
             }
         }
         .onAppear(perform: load)
-        .alert("Cannot save", isPresented: $showSaveError) {
+        .confirmationDialog("Delete this day entry?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete day entry", role: .destructive) { deleteDayEntry() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all saved country/work and trip details for this date.")
+        }
+        .alert(errorTitle, isPresented: $showSaveError) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(saveError ?? "")
@@ -136,6 +155,7 @@ struct DayDetailView: View {
         })
 
         if let existing = try? modelContext.fetch(fd).first {
+            hasExistingEntry = true
             let sorted = existing.segments.sorted { $0.sortOrder < $1.sortOrder }
             if let s0 = sorted.first {
                 country0 = s0.countryCode
@@ -153,6 +173,7 @@ struct DayDetailView: View {
                 ticketImages = t.ticketImages.sorted { $0.sortOrder < $1.sortOrder }.compactMap(\.imageData)
             }
         } else {
+            hasExistingEntry = false
             let allDescriptor = FetchDescriptor<JournalDay>(sortBy: [SortDescriptor(\.day)])
             let all = (try? modelContext.fetch(allDescriptor)) ?? []
             let snaps = all.map { $0.snapshotForValidation() }
@@ -214,6 +235,7 @@ struct DayDetailView: View {
         )
 
         if let err = snapshot.validationError() {
+            errorTitle = "Cannot save"
             saveError = err.errorDescription ?? "This day could not be saved."
             showSaveError = true
             return
@@ -284,6 +306,36 @@ struct DayDetailView: View {
             try modelContext.save()
             dismiss()
         } catch {
+            errorTitle = "Cannot save"
+            saveError = error.localizedDescription
+            showSaveError = true
+        }
+    }
+
+    private func deleteDayEntry() {
+        let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+        let fd = FetchDescriptor<JournalDay>(predicate: #Predicate { journalDay in
+            journalDay.day == normalized
+        })
+
+        do {
+            guard let existing = try modelContext.fetch(fd).first else {
+                dismiss()
+                return
+            }
+
+            if let trip = existing.trip {
+                existing.trip = nil
+                if trip.journalDays.count <= 1 {
+                    modelContext.delete(trip)
+                }
+            }
+
+            modelContext.delete(existing)
+            try modelContext.save()
+            dismiss()
+        } catch {
+            errorTitle = "Cannot delete day"
             saveError = error.localizedDescription
             showSaveError = true
         }
