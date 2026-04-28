@@ -23,6 +23,7 @@ struct DayDetailView: View {
     @State private var working0 = true
     @State private var country1 = "DE"
     @State private var working1 = false
+    @State private var nonWorkingReason: DayNonWorkingReason = .none
 
     @State private var flight = ""
     @State private var depCountry = ""
@@ -51,6 +52,14 @@ struct DayDetailView: View {
                 if splitTravelDay {
                     countryPicker(title: "Second country", selection: $country1)
                     Toggle("Working in second country", isOn: $working1)
+                }
+            }
+
+            Section("Leave status (independent from working status)") {
+                Picker("Leave status", selection: $nonWorkingReason) {
+                    ForEach(DayNonWorkingReason.allCases, id: \.rawValue) { reason in
+                        Text(reason.title).tag(reason)
+                    }
                 }
             }
 
@@ -156,6 +165,7 @@ struct DayDetailView: View {
 
         if let existing = try? modelContext.fetch(fd).first {
             hasExistingEntry = true
+            nonWorkingReason = existing.nonWorkingReason
             let sorted = existing.segments.sorted { $0.sortOrder < $1.sortOrder }
             if let s0 = sorted.first {
                 country0 = s0.countryCode
@@ -174,6 +184,7 @@ struct DayDetailView: View {
             }
         } else {
             hasExistingEntry = false
+            nonWorkingReason = .none
             let allDescriptor = FetchDescriptor<JournalDay>(sortBy: [SortDescriptor(\.day)])
             let all = (try? modelContext.fetch(allDescriptor)) ?? []
             let snaps = all.map { $0.snapshotForValidation() }
@@ -244,6 +255,7 @@ struct DayDetailView: View {
         let journal: JournalDay
         if let existing {
             journal = existing
+            journal.nonWorkingReason = nonWorkingReason
             let tripKeep = existing.trip
             for seg in journal.segments {
                 modelContext.delete(seg)
@@ -251,7 +263,10 @@ struct DayDetailView: View {
             journal.segments.removeAll()
             journal.trip = tripKeep
         } else {
-            journal = JournalDay(day: normalized)
+            journal = JournalDay(
+                day: normalized,
+                nonWorkingReasonRawValue: nonWorkingReason == .none ? nil : nonWorkingReason.rawValue
+            )
             modelContext.insert(journal)
         }
 

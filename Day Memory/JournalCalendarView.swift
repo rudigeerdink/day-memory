@@ -168,6 +168,7 @@ struct JournalCalendarView: View {
         let accentCountryLine = emphasizeCountryLine(forNormalizedDay: normalized, record: record)
         let workAwayFromEmployer = showsWorkAwayFromEmployer(normalizedDay: normalized, record: record)
         let transitionStyle = transitionIndicatorStyle(forNormalizedDay: normalized, record: record)
+        let reasonTint = nonWorkingReasonTint(for: record)
 
         let todayStart = ModelValidation.startOfDay(Date(), calendar: calendar)
         let isPastDay = normalized < todayStart
@@ -180,7 +181,11 @@ struct JournalCalendarView: View {
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemGroupedBackground))
+                    .fill(isSelected ? Color.primary.opacity(0.08) : Color(.secondarySystemGroupedBackground))
+                if let reasonTint {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(reasonTint)
+                }
                 VStack(spacing: 4) {
                     Text("\(calendar.component(.day, from: day))")
                         .font(.body.weight(isToday ? .bold : .regular))
@@ -343,6 +348,18 @@ struct JournalCalendarView: View {
         }
 
         return AnyShapeStyle(countryDotColor(countryCode: first.countryCode, isWorking: first.isWorking))
+    }
+
+    private func nonWorkingReasonTint(for record: JournalDay?) -> Color? {
+        guard let record else { return nil }
+        switch record.nonWorkingReason {
+        case .none:
+            return nil
+        case .annualLeave:
+            return Color.blue.opacity(0.08)
+        case .publicHoliday:
+            return Color.orange.opacity(0.08)
+        }
     }
 
     /// Primary presence country for a day (first segment), or `nil` if unlogged.

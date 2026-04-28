@@ -19,6 +19,7 @@ struct DayMemoryBackupEmployer: Codable {
     var employerCountryCode: String
     var startDate: Date
     var endDate: Date
+    var annualLeaveEntitlementDays: Int?
 }
 
 struct DayMemoryBackupJournalDay: Codable {
@@ -26,6 +27,7 @@ struct DayMemoryBackupJournalDay: Codable {
     var day: Date
     var segments: [DayMemoryBackupSegment]
     var trip: DayMemoryBackupTrip?
+    var nonWorkingReason: String?
 }
 
 struct DayMemoryBackupSegment: Codable {

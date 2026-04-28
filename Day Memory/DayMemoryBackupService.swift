@@ -26,7 +26,7 @@ enum DayMemoryBackupError: LocalizedError {
 @MainActor
 enum DayMemoryBackupService {
     static let iCloudBackupFileName = "DayMemory-backup.json"
-    static let formatVersion = 1
+    static let formatVersion = 2
 
     private static var jsonEncoder: JSONEncoder {
         let e = JSONEncoder()
@@ -53,7 +53,8 @@ enum DayMemoryBackupService {
                 companyName: e.companyName,
                 employerCountryCode: e.employerCountryCode,
                 startDate: e.startDate,
-                endDate: e.endDate
+                endDate: e.endDate,
+                annualLeaveEntitlementDays: e.annualLeaveEntitlementDays
             )
         }
 
@@ -86,7 +87,8 @@ enum DayMemoryBackupService {
                             )
                         }
                     )
-                }
+                },
+                nonWorkingReason: jd.nonWorkingReason == .none ? nil : jd.nonWorkingReason.rawValue
             )
         }
 
@@ -112,7 +114,7 @@ enum DayMemoryBackupService {
 
     static func importData(_ data: Data, modelContext: ModelContext) throws {
         let envelope = try jsonDecoder.decode(DayMemoryBackupEnvelope.self, from: data)
-        guard envelope.formatVersion == formatVersion else {
+        guard envelope.formatVersion == 1 || envelope.formatVersion == formatVersion else {
             throw DayMemoryBackupError.unsupportedVersion(envelope.formatVersion)
         }
 
@@ -124,13 +126,20 @@ enum DayMemoryBackupService {
                 companyName: e.companyName,
                 employerCountryCode: e.employerCountryCode,
                 startDate: e.startDate,
-                endDate: e.endDate
+                endDate: e.endDate,
+                annualLeaveEntitlementDaysRaw: e.annualLeaveEntitlementDays
             )
             modelContext.insert(ep)
         }
 
         for dto in envelope.journalDays {
-            let jd = JournalDay(id: dto.id, day: dto.day, segments: [], trip: nil)
+            let jd = JournalDay(
+                id: dto.id,
+                day: dto.day,
+                segments: [],
+                trip: nil,
+                nonWorkingReasonRawValue: dto.nonWorkingReason ?? DayNonWorkingReason.none.rawValue
+            )
             modelContext.insert(jd)
 
             if let t = dto.trip {

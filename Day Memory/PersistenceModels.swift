@@ -13,19 +13,22 @@ final class EmployerPeriod {
     var employerCountryCode: String
     var startDate: Date
     var endDate: Date
+    var annualLeaveEntitlementDaysRaw: Int?
 
     init(
         id: UUID = UUID(),
         companyName: String,
         employerCountryCode: String,
         startDate: Date,
-        endDate: Date
+        endDate: Date,
+        annualLeaveEntitlementDaysRaw: Int? = nil
     ) {
         self.id = id
         self.companyName = companyName
         self.employerCountryCode = employerCountryCode
         self.startDate = startDate
         self.endDate = endDate
+        self.annualLeaveEntitlementDaysRaw = annualLeaveEntitlementDaysRaw
     }
 }
 
@@ -37,12 +40,20 @@ final class JournalDay {
     @Relationship(deleteRule: .cascade, inverse: \PresenceSegment.journalDay)
     var segments: [PresenceSegment]
     var trip: Trip?
+    var nonWorkingReasonRawValue: String?
 
-    init(id: UUID = UUID(), day: Date, segments: [PresenceSegment] = [], trip: Trip? = nil) {
+    init(
+        id: UUID = UUID(),
+        day: Date,
+        segments: [PresenceSegment] = [],
+        trip: Trip? = nil,
+        nonWorkingReasonRawValue: String? = nil
+    ) {
         self.id = id
         self.day = day
         self.segments = segments
         self.trip = trip
+        self.nonWorkingReasonRawValue = nonWorkingReasonRawValue
     }
 }
 
@@ -116,6 +127,13 @@ final class TripTicketImage {
 }
 
 extension JournalDay {
+    var nonWorkingReason: DayNonWorkingReason {
+        get { DayNonWorkingReason(rawValue: nonWorkingReasonRawValue ?? DayNonWorkingReason.none.rawValue) ?? .none }
+        set {
+            nonWorkingReasonRawValue = (newValue == .none) ? nil : newValue.rawValue
+        }
+    }
+
     func snapshotForValidation() -> DayRecordSnapshot {
         DayRecordSnapshot(
             id: id,
@@ -125,6 +143,13 @@ extension JournalDay {
             },
             linkedTripId: trip?.id
         )
+    }
+}
+
+extension EmployerPeriod {
+    var annualLeaveEntitlementDays: Int {
+        get { annualLeaveEntitlementDaysRaw ?? 0 }
+        set { annualLeaveEntitlementDaysRaw = newValue }
     }
 }
 

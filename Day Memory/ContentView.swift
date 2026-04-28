@@ -19,7 +19,10 @@ struct ContentView: View {
                 .tabItem { Label("Journal", systemImage: "calendar") }
 
             YearOverviewView()
-                .tabItem { Label("Overview", systemImage: "chart.pie") }
+                .tabItem { Label("Work view", systemImage: "chart.pie") }
+
+            LeaveDashboardView()
+                .tabItem { Label("Leave view", systemImage: "chart.bar.doc.horizontal") }
 
             EmployerPeriodsView()
                 .tabItem { Label("Employers", systemImage: "building.2") }

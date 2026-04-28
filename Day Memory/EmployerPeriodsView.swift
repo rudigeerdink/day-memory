@@ -38,6 +38,9 @@ struct EmployerPeriodsView: View {
                                 Text("\(period.employerCountryCode) · \(period.startDate, format: .dateTime.day().month(.abbreviated).year()) – \(period.endDate, format: .dateTime.day().month(.abbreviated).year())")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                                Text("Annual entitlement: \(period.annualLeaveEntitlementDays) days")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 4)
                         }
@@ -105,6 +108,7 @@ struct EmployerPeriodForm: View {
     @State private var countryCode = "NL"
     @State private var startDate = Date.now
     @State private var endDate = Date.now
+    @State private var annualLeaveEntitlementDays = 0
 
     @State private var saveError: String?
     @State private var showSaveError = false
@@ -123,6 +127,11 @@ struct EmployerPeriodForm: View {
                 DatePicker("Start", selection: $startDate, displayedComponents: .date)
                 DatePicker("End", selection: $endDate, displayedComponents: .date)
             }
+            Section("Leave entitlement") {
+                Stepper(value: $annualLeaveEntitlementDays, in: 0...365) {
+                    Text("Annual leave days: \(annualLeaveEntitlementDays)")
+                }
+            }
         }
         .navigationTitle(period == nil ? "New period" : "Edit period")
         .navigationBarTitleDisplayMode(.inline)
@@ -140,6 +149,7 @@ struct EmployerPeriodForm: View {
                 countryCode = period.employerCountryCode
                 startDate = period.startDate
                 endDate = period.endDate
+                annualLeaveEntitlementDays = period.annualLeaveEntitlementDays
             }
         }
         .alert("Cannot save", isPresented: $showSaveError) {
@@ -187,13 +197,15 @@ struct EmployerPeriodForm: View {
                 existing.employerCountryCode = code
                 existing.startDate = ns
                 existing.endDate = ne
+                existing.annualLeaveEntitlementDays = annualLeaveEntitlementDays
             } else {
                 let newPeriod = EmployerPeriod(
                     id: UUID(),
                     companyName: trimmed,
                     employerCountryCode: code,
                     startDate: ns,
-                    endDate: ne
+                    endDate: ne,
+                    annualLeaveEntitlementDaysRaw: annualLeaveEntitlementDays
                 )
                 modelContext.insert(newPeriod)
             }
