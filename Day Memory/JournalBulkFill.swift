@@ -34,9 +34,9 @@ enum JournalBulkFill {
         let allDescriptor = FetchDescriptor<JournalDay>(sortBy: [SortDescriptor(\.day)])
 
         for day in week {
-            let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+            let dayKey = JournalCalendar.dayKey(for: day)
             let existingFD = FetchDescriptor<JournalDay>(predicate: #Predicate { journalDay in
-                journalDay.day == normalized
+                journalDay.dayKey == dayKey
             })
             if try context.fetch(existingFD).first != nil {
                 continue
@@ -47,13 +47,14 @@ enum JournalBulkFill {
 
             let country =
                 ModelValidation.lastKnownCountry(
-                    before: day,
+                    beforeDayKey: dayKey,
                     priorRecords: snapshots,
-                    calendar: calendar,
                     fallback: fallbackCountry
                 ) ?? fallbackCountry ?? "NL"
 
-            let working = !calendar.isDateInWeekend(day)
+            let anchor = JournalCalendar.sortAnchor(dayKey: dayKey)
+                ?? ModelValidation.startOfDay(day, calendar: calendar)
+            let working = !calendar.isDateInWeekend(anchor)
             try upsertSingleSegmentDay(
                 day: day,
                 country: country.uppercased(),
@@ -71,9 +72,11 @@ enum JournalBulkFill {
         calendar: Calendar,
         context: ModelContext
     ) throws {
-        let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+        let dayKey = JournalCalendar.dayKey(for: day)
+        let anchor = JournalCalendar.sortAnchor(dayKey: dayKey)
+            ?? ModelValidation.startOfDay(day, calendar: calendar)
         let fd = FetchDescriptor<JournalDay>(predicate: #Predicate { journalDay in
-            journalDay.day == normalized
+            journalDay.dayKey == dayKey
         })
         let existing = try context.fetch(fd).first
 
@@ -88,7 +91,7 @@ enum JournalBulkFill {
             existing.trip = trip
             context.insert(seg)
         } else {
-            let jd = JournalDay(day: normalized, segments: [], trip: nil)
+            let jd = JournalDay(day: anchor, dayKey: dayKey, segments: [], trip: nil)
             let seg = PresenceSegment(countryCode: country, isWorking: isWorking, sortOrder: 0, journalDay: jd)
             jd.segments.append(seg)
             context.insert(jd)

@@ -99,7 +99,7 @@ struct EmployerPeriodForm: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    private var calendar: Calendar { .autoupdatingCurrent }
+    private var calendar: Calendar { JournalCalendar.civil }
 
     /// `nil` creates a new period.
     var period: EmployerPeriod?

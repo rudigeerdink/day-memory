@@ -10,9 +10,10 @@ struct YearOverviewView: View {
     @Query(sort: \JournalDay.day) private var journalDays: [JournalDay]
     @Query(sort: \EmployerPeriod.startDate) private var employerPeriods: [EmployerPeriod]
 
-    @State private var year: Int = Calendar.autoupdatingCurrent.component(.year, from: .now)
+    @State private var year: Int = JournalCalendar.civil.component(.year, from: .now)
+    @State private var countScope: YearCountScope = .throughToday
 
-    private var calendar: Calendar { .autoupdatingCurrent }
+    private var calendar: Calendar { JournalCalendar.civil }
     private let workingColor = Color(red: 0.07, green: 0.24, blue: 0.50)
     private let nonWorkingColor = Color(red: 0.67, green: 0.83, blue: 0.98)
     private let cardBackground = Color(.secondarySystemGroupedBackground)
@@ -24,6 +25,11 @@ struct YearOverviewView: View {
             employerPeriods: employerPeriods,
             calendar: calendar
         )
+    }
+
+    private var showsFutureEntriesHint: Bool {
+        guard countScope == .fullYear, year == calendar.component(.year, from: .now) else { return false }
+        return report.yearTotalsByCountry.contains { $0.presenceUnits > $0.presenceUnitsThroughToday }
     }
 
     var body: some View {
@@ -66,6 +72,21 @@ struct YearOverviewView: View {
                         Spacer(minLength: 0)
                     }
 
+                    Picker("Count scope", selection: $countScope) {
+                        ForEach(YearCountScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    scopeCaption
+
+                    if showsFutureEntriesHint {
+                        Text("Includes journal entries on future dates in \(String(year)).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if report.yearTotalsByCountry.isEmpty {
                         ContentUnavailableView(
                             "No journal entries",
@@ -98,24 +119,22 @@ struct YearOverviewView: View {
                         }
                     }
 
-                    if report.unloggedCalendarDaysInYear > 0 {
-                        HStack {
-                            Label("Days without an entry", systemImage: "calendar.badge.exclamationmark")
-                                .font(.subheadline)
-                            Spacer()
-                            Text("\(report.unloggedCalendarDaysInYear)")
-                                .font(.subheadline.weight(.semibold))
-                                .monospacedDigit()
-                        }
-                        .padding(14)
-                        .background(cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    let unlogged = unloggedCount(for: countScope)
+                    if unlogged > 0 {
+                        unloggedDaysRow(count: unlogged)
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .navigationTitle("Overview")
+            .navigationTitle("Work view")
             .background(Color(.systemGroupedBackground))
+            .onAppear {
+                countScope = YearCountScope.defaultForYear(year, calendar: calendar)
+            }
+            .onChange(of: year) { _, newYear in
+                countScope = YearCountScope.defaultForYear(newYear, calendar: calendar)
+            }
         }
     }
 
@@ -124,14 +143,50 @@ struct YearOverviewView: View {
         return Array((current - 5)...(current + 1))
     }
 
+    private var scopeCaption: some View {
+        Group {
+            switch countScope {
+            case .throughToday:
+                if let end = report.throughTodayEnd {
+                    Text(
+                        "Presence days through \(end, format: .dateTime.day().month(.abbreviated).day().year()) in your journal calendar."
+                    )
+                } else {
+                    Text("No days in \(String(year)) on or before today yet.")
+                }
+            case .fullYear:
+                Text("All journal entries in \(String(year)), including dates after today.")
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func unloggedCount(for scope: YearCountScope) -> Int {
+        switch scope {
+        case .throughToday:
+            return report.unloggedCalendarDaysInYearThroughToday
+        case .fullYear:
+            return report.unloggedCalendarDaysInYear
+        }
+    }
+
     private func locationCard(_ row: YearLocationStat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let c = row.counts(for: countScope)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 countryCodeBadge(row.countryCode)
                 Text(CountryDisplay.name(for: row.countryCode))
                     .font(.title3.weight(.semibold))
             }
-            ringWithMetrics(total: row.presenceUnits, working: row.working, nonWorking: row.nonWorking, ringSize: 98, lineWidth: 10)
+            ringWithMetrics(
+                total: c.presence,
+                working: c.working,
+                nonWorking: c.nonWorking,
+                ringSize: 98,
+                lineWidth: 10
+            )
         }
         .padding(16)
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -158,7 +213,6 @@ struct YearOverviewView: View {
                     }
                 }
             }
-
         }
         .padding(16)
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -228,17 +282,31 @@ struct YearOverviewView: View {
         }
     }
 
+    private func unloggedDaysRow(count: Int) -> some View {
+        HStack {
+            Label("Days without an entry", systemImage: "calendar.badge.exclamationmark")
+                .font(.subheadline)
+            Spacer()
+            Text("\(count)")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(14)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
     private func employerCountryBreakdownRow(_ row: YearLocationStat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let c = row.counts(for: countScope)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 countryCodeBadge(row.countryCode)
                 Text(CountryDisplay.name(for: row.countryCode))
                     .font(.subheadline.weight(.medium))
             }
             ringWithMetrics(
-                total: row.presenceUnits,
-                working: row.working,
-                nonWorking: row.nonWorking,
+                total: c.presence,
+                working: c.working,
+                nonWorking: c.nonWorking,
                 ringSize: 98,
                 lineWidth: 10
             )

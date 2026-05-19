@@ -11,6 +11,7 @@ struct BackupSettingsView: View {
     @Environment(\.modelContext) private var modelContext
 
     @AppStorage(BackupPreferences.autoICloudBackupKey) private var autoICloudBackup = false
+    @AppStorage(JournalCalendar.timeZonePreferenceKey) private var journalTimeZoneID = TimeZone.current.identifier
 
     /// Sheet content must not depend on a separate flag + optional URL (race → empty view / grey sheet).
     private struct PreparedExport: Identifiable {
@@ -39,6 +40,20 @@ struct BackupSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Journal calendar") {
+                    Text(
+                        "Journal days are stored by calendar date in this timezone. It stays the same when you travel; change it only if your \"home\" calendar should follow a different region."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                    Picker("Timezone for journal dates", selection: $journalTimeZoneID) {
+                        ForEach(TimeZone.knownTimeZoneIdentifiers.sorted(), id: \.self) { id in
+                            Text(timeZoneLabel(id)).tag(id)
+                        }
+                    }
+                }
+
                 Section("Export") {
                     Text(
                         "Creates a JSON file with employers, journal days, segments, trips, and ticket photos. Treat it as private."
@@ -94,6 +109,14 @@ struct BackupSettingsView: View {
                 }
             }
             .navigationTitle("Backup")
+            .onAppear {
+                JournalCalendar.ensurePreferenceInitialized()
+            }
+            .onChange(of: journalTimeZoneID) { _, newId in
+                Task {
+                    try? JournalCalendar.setCivilTimeZone(identifier: newId, modelContext: modelContext)
+                }
+            }
             .sheet(item: $preparedExport) { prepared in
                 ShareSheet(activityItems: [prepared.url])
             }
@@ -137,6 +160,10 @@ struct BackupSettingsView: View {
                 }
             }
         }
+    }
+
+    private func timeZoneLabel(_ identifier: String) -> String {
+        identifier.replacingOccurrences(of: "_", with: " ")
     }
 
     @MainActor

@@ -25,6 +25,8 @@ struct DayMemoryBackupEmployer: Codable {
 struct DayMemoryBackupJournalDay: Codable {
     var id: UUID
     var day: Date
+    /// ISO `yyyy-MM-dd` civil journal day (format v3+). Older archives infer this from `day` on import.
+    var dayKey: String?
     var segments: [DayMemoryBackupSegment]
     var trip: DayMemoryBackupTrip?
     var nonWorkingReason: String?

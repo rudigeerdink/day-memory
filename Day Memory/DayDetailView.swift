@@ -37,7 +37,7 @@ struct DayDetailView: View {
     @State private var hasExistingEntry = false
     @State private var showDeleteConfirmation = false
 
-    private var calendar: Calendar { .autoupdatingCurrent }
+    private var calendar: Calendar { JournalCalendar.civil }
 
     var body: some View {
         Form {
@@ -158,9 +158,9 @@ struct DayDetailView: View {
         guard !didLoad else { return }
         didLoad = true
 
-        let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+        let dayKey = JournalCalendar.dayKey(for: day)
         let fd = FetchDescriptor<JournalDay>(predicate: #Predicate { journalDay in
-            journalDay.day == normalized
+            journalDay.dayKey == dayKey
         })
 
         if let existing = try? modelContext.fetch(fd).first {
@@ -188,14 +188,15 @@ struct DayDetailView: View {
             let allDescriptor = FetchDescriptor<JournalDay>(sortBy: [SortDescriptor(\.day)])
             let all = (try? modelContext.fetch(allDescriptor)) ?? []
             let snaps = all.map { $0.snapshotForValidation() }
+            let anchor = JournalCalendar.sortAnchor(dayKey: dayKey)
+                ?? ModelValidation.startOfDay(day, calendar: calendar)
             country0 =
                 ModelValidation.lastKnownCountry(
-                    before: normalized,
+                    beforeDayKey: dayKey,
                     priorRecords: snaps,
-                    calendar: calendar,
                     fallback: defaultFallbackCountry
                 ) ?? defaultFallbackCountry
-            working0 = !calendar.isDateInWeekend(normalized)
+            working0 = !calendar.isDateInWeekend(anchor)
         }
     }
 
@@ -213,7 +214,10 @@ struct DayDetailView: View {
     }
 
     private func save() {
-        let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+        let dayKey = JournalCalendar.dayKey(for: day)
+        let anchor = JournalCalendar.sortAnchor(dayKey: dayKey)
+            ?? ModelValidation.startOfDay(day, calendar: calendar)
+        let normalized = ModelValidation.startOfDay(anchor, calendar: calendar)
 
         var segs: [DayPresenceSegmentSnapshot] = [
             DayPresenceSegmentSnapshot(
@@ -235,12 +239,13 @@ struct DayDetailView: View {
         }
 
         let fd = FetchDescriptor<JournalDay>(predicate: #Predicate { journalDay in
-            journalDay.day == normalized
+            journalDay.dayKey == dayKey
         })
         let existing = try? modelContext.fetch(fd).first
         let snapshot = DayRecordSnapshot(
             id: existing?.id ?? UUID(),
-            day: normalized,
+            day: anchor,
+            dayKey: dayKey,
             segments: segs,
             linkedTripId: existing?.trip?.id
         )
@@ -256,6 +261,8 @@ struct DayDetailView: View {
         if let existing {
             journal = existing
             journal.nonWorkingReason = nonWorkingReason
+            journal.day = anchor
+            journal.dayKey = dayKey
             let tripKeep = existing.trip
             for seg in journal.segments {
                 modelContext.delete(seg)
@@ -264,7 +271,8 @@ struct DayDetailView: View {
             journal.trip = tripKeep
         } else {
             journal = JournalDay(
-                day: normalized,
+                day: anchor,
+                dayKey: dayKey,
                 nonWorkingReasonRawValue: nonWorkingReason == .none ? nil : nonWorkingReason.rawValue
             )
             modelContext.insert(journal)
@@ -328,9 +336,9 @@ struct DayDetailView: View {
     }
 
     private func deleteDayEntry() {
-        let normalized = ModelValidation.startOfDay(day, calendar: calendar)
+        let dayKey = JournalCalendar.dayKey(for: day)
         let fd = FetchDescriptor<JournalDay>(predicate: #Predicate { journalDay in
-            journalDay.day == normalized
+            journalDay.dayKey == dayKey
         })
 
         do {

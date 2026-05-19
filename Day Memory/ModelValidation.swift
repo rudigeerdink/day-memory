@@ -146,22 +146,18 @@ extension ModelValidation {
 // MARK: - Bulk fill: last known country
 
 extension ModelValidation {
-    /// Walks **backwards** from `day` (exclusive) through `priorRecords` (unsorted; sorted internally by day)
-    /// and returns the country of the first segment with the lowest `sortOrder` on the latest prior day.
+    /// Walks **backwards** from `beforeDayKey` (exclusive) through `priorRecords` (unsorted).
     static func lastKnownCountry(
-        before day: Date,
+        beforeDayKey: String,
         priorRecords: [DayRecordSnapshot],
-        calendar: Calendar,
         fallback: CountryCode?
     ) -> CountryCode? {
-        let anchor = startOfDay(day, calendar: calendar)
         let sorted = priorRecords
-            .map { r -> (Date, DayRecordSnapshot) in (startOfDay(r.day, calendar: calendar), r) }
-            .filter { $0.0 < anchor }
-            .sorted { $0.0 < $1.0 }
+            .filter { $0.dayKey < beforeDayKey }
+            .sorted { $0.dayKey < $1.dayKey }
 
         guard let last = sorted.last else { return fallback }
-        let firstSeg = last.1.segments.min(by: { $0.sortOrder < $1.sortOrder })
+        let firstSeg = last.segments.min(by: { $0.sortOrder < $1.sortOrder })
         return firstSeg?.countryCode ?? fallback
     }
 }

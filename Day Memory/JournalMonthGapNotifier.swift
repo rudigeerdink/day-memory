@@ -14,7 +14,7 @@ enum JournalMonthGapNotifier {
     /// Reschedule the monthly reminder: only when the **previous calendar month** has at least one day
     /// without a journal entry. Fires on the **next** 1st of the month at 09:00 (local), one-shot.
     static func refresh(modelContext: ModelContext) async {
-        let calendar = Calendar.autoupdatingCurrent
+        let calendar = JournalCalendar.civil
         let now = Date()
 
         let center = UNUserNotificationCenter.current()
@@ -111,7 +111,8 @@ enum JournalMonthGapNotifier {
 
         var logged: Set<Date> = []
         for jd in journalDays {
-            let n = ModelValidation.startOfDay(jd.day, calendar: calendar)
+            guard let start = JournalCalendar.normalizedStartOfDay(dayKey: jd.canonicalDayKey) else { continue }
+            let n = ModelValidation.startOfDay(start, calendar: calendar)
             logged.insert(n)
         }
 

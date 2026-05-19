@@ -9,10 +9,14 @@ import Foundation
 /// (a split travel day contributes one unit to each of two countries).
 struct YearLocationStat: Hashable, Sendable {
     var countryCode: String
-    /// Segment count (= working + nonWorking).
+    /// Segment count (= working + nonWorking) for the full selected year range.
     var presenceUnits: Int
     var working: Int
     var nonWorking: Int
+    /// Same metrics counting only journal days on or before today (journal calendar).
+    var presenceUnitsThroughToday: Int
+    var workingThroughToday: Int
+    var nonWorkingThroughToday: Int
 }
 
 struct YearEmployerSlice: Identifiable, Hashable, Sendable {
@@ -22,15 +26,19 @@ struct YearEmployerSlice: Identifiable, Hashable, Sendable {
     var clippedRangeStart: Date
     var clippedRangeEnd: Date
     var byPresenceCountry: [YearLocationStat]
-    /// Calendar days in the clipped range with no journal entry.
+    /// Calendar days in the clipped range with no journal entry (full year range).
     var unloggedCalendarDays: Int
+    var unloggedCalendarDaysThroughToday: Int
 }
 
 struct YearOverviewReport: Hashable, Sendable {
     var year: Int
     var yearTotalsByCountry: [YearLocationStat]
     var unloggedCalendarDaysInYear: Int
+    var unloggedCalendarDaysInYearThroughToday: Int
     var employerSlices: [YearEmployerSlice]
+    /// Last calendar day included in the “through today” slice (journal timezone).
+    var throughTodayEnd: Date?
 }
 
 enum YearOverviewAggregator {
@@ -42,18 +50,38 @@ enum YearOverviewAggregator {
     ) -> YearOverviewReport {
         let dayMap = journalDayMap(journalDays, calendar: calendar)
         guard let (yearStart, yearEnd) = yearBounds(year: year, calendar: calendar) else {
-            return YearOverviewReport(year: year, yearTotalsByCountry: [], unloggedCalendarDaysInYear: 0, employerSlices: [])
+            return YearOverviewReport(
+                year: year,
+                yearTotalsByCountry: [],
+                unloggedCalendarDaysInYear: 0,
+                unloggedCalendarDaysInYearThroughToday: 0,
+                employerSlices: [],
+                throughTodayEnd: nil
+            )
         }
 
+        let todayEnd = throughTodayEnd(rangeStart: yearStart, rangeEnd: yearEnd, calendar: calendar)
         let yearDayList = inclusiveDayRange(from: yearStart, through: yearEnd, calendar: calendar)
-        let (yearStats, yearUnlogged) = aggregate(days: yearDayList, dayMap: dayMap)
+        let yearDayListThroughToday = todayEnd.map {
+            inclusiveDayRange(from: yearStart, through: $0, calendar: calendar)
+        } ?? []
+
+        let (yearStats, yearUnlogged) = aggregate(days: yearDayList, daysThroughToday: yearDayListThroughToday, dayMap: dayMap)
+        let yearUnloggedThroughToday = aggregateUnloggedOnly(days: yearDayListThroughToday, dayMap: dayMap)
 
         let employerSlices: [YearEmployerSlice] = employerPeriods.compactMap { period in
             guard let (clipStart, clipEnd) = clipPeriodToYear(period: period, year: year, calendar: calendar) else {
                 return nil
             }
             let days = inclusiveDayRange(from: clipStart, through: clipEnd, calendar: calendar)
-            let (stats, unlogged) = aggregate(days: days, dayMap: dayMap)
+            let daysThroughToday: [Date]
+            if let cap = throughTodayEnd(rangeStart: clipStart, rangeEnd: clipEnd, calendar: calendar) {
+                daysThroughToday = inclusiveDayRange(from: clipStart, through: cap, calendar: calendar)
+            } else {
+                daysThroughToday = []
+            }
+            let (stats, unlogged) = aggregate(days: days, daysThroughToday: daysThroughToday, dayMap: dayMap)
+            let unloggedThroughToday = aggregateUnloggedOnly(days: daysThroughToday, dayMap: dayMap)
             return YearEmployerSlice(
                 id: period.id,
                 companyName: period.companyName,
@@ -61,7 +89,8 @@ enum YearOverviewAggregator {
                 clippedRangeStart: clipStart,
                 clippedRangeEnd: clipEnd,
                 byPresenceCountry: stats,
-                unloggedCalendarDays: unlogged
+                unloggedCalendarDays: unlogged,
+                unloggedCalendarDaysThroughToday: unloggedThroughToday
             )
         }
         .sorted { $0.clippedRangeStart < $1.clippedRangeStart }
@@ -70,8 +99,20 @@ enum YearOverviewAggregator {
             year: year,
             yearTotalsByCountry: yearStats,
             unloggedCalendarDaysInYear: yearUnlogged,
-            employerSlices: employerSlices
+            unloggedCalendarDaysInYearThroughToday: yearUnloggedThroughToday,
+            employerSlices: employerSlices,
+            throughTodayEnd: todayEnd
         )
+    }
+
+    /// Inclusive end date for “through today” within `[rangeStart, rangeEnd]` (journal calendar). `nil` if today is before the range.
+    static func throughTodayEnd(rangeStart: Date, rangeEnd: Date, calendar: Calendar) -> Date? {
+        let start = ModelValidation.startOfDay(rangeStart, calendar: calendar)
+        let end = ModelValidation.startOfDay(rangeEnd, calendar: calendar)
+        let today = ModelValidation.startOfDay(Date(), calendar: calendar)
+        let capped = min(today, end)
+        guard capped >= start else { return nil }
+        return capped
     }
 
     // MARK: - Core aggregation
@@ -79,7 +120,8 @@ enum YearOverviewAggregator {
     private static func journalDayMap(_ days: [JournalDay], calendar: Calendar) -> [Date: JournalDay] {
         var map: [Date: JournalDay] = [:]
         for d in days {
-            let key = ModelValidation.startOfDay(d.day, calendar: calendar)
+            guard let start = JournalCalendar.normalizedStartOfDay(dayKey: d.canonicalDayKey) else { continue }
+            let key = ModelValidation.startOfDay(start, calendar: calendar)
             map[key] = d
         }
         return map
@@ -87,34 +129,63 @@ enum YearOverviewAggregator {
 
     private static func aggregate(
         days: [Date],
+        daysThroughToday: [Date],
         dayMap: [Date: JournalDay]
     ) -> ([YearLocationStat], unlogged: Int) {
         var workingByCountry: [String: Int] = [:]
         var nonWorkingByCountry: [String: Int] = [:]
+        var workingToday: [String: Int] = [:]
+        var nonWorkingToday: [String: Int] = [:]
         var unlogged = 0
 
-        for day in days {
-            guard let journal = dayMap[day] else {
-                unlogged += 1
-                continue
-            }
-            for seg in journal.segments {
-                let code = seg.countryCode
-                if seg.isWorking {
-                    workingByCountry[code, default: 0] += 1
-                } else {
-                    nonWorkingByCountry[code, default: 0] += 1
+        func countSegments(in dayList: [Date], working: inout [String: Int], nonWorking: inout [String: Int]) {
+            for day in dayList {
+                guard let journal = dayMap[day] else { continue }
+                for seg in journal.segments {
+                    let code = seg.countryCode
+                    if seg.isWorking {
+                        working[code, default: 0] += 1
+                    } else {
+                        nonWorking[code, default: 0] += 1
+                    }
                 }
             }
         }
 
-        let codes = Set(workingByCountry.keys).union(nonWorkingByCountry.keys).sorted()
+        for day in days {
+            if dayMap[day] == nil {
+                unlogged += 1
+            }
+        }
+
+        countSegments(in: days, working: &workingByCountry, nonWorking: &nonWorkingByCountry)
+        countSegments(in: daysThroughToday, working: &workingToday, nonWorking: &nonWorkingToday)
+
+        let codes = Set(workingByCountry.keys)
+            .union(nonWorkingByCountry.keys)
+            .union(workingToday.keys)
+            .union(nonWorkingToday.keys)
+            .sorted()
         let stats: [YearLocationStat] = codes.map { code in
             let w = workingByCountry[code, default: 0]
             let n = nonWorkingByCountry[code, default: 0]
-            return YearLocationStat(countryCode: code, presenceUnits: w + n, working: w, nonWorking: n)
+            let wt = workingToday[code, default: 0]
+            let nt = nonWorkingToday[code, default: 0]
+            return YearLocationStat(
+                countryCode: code,
+                presenceUnits: w + n,
+                working: w,
+                nonWorking: n,
+                presenceUnitsThroughToday: wt + nt,
+                workingThroughToday: wt,
+                nonWorkingThroughToday: nt
+            )
         }
         return (stats, unlogged)
+    }
+
+    private static func aggregateUnloggedOnly(days: [Date], dayMap: [Date: JournalDay]) -> Int {
+        days.reduce(0) { $0 + (dayMap[$1] == nil ? 1 : 0) }
     }
 
     // MARK: - Calendar ranges
@@ -164,5 +235,16 @@ enum YearOverviewAggregator {
 enum CountryDisplay {
     static func name(for code: String) -> String {
         Countries.common.first { $0.code == code }?.name ?? code
+    }
+}
+
+extension YearLocationStat {
+    func counts(for scope: YearCountScope) -> (presence: Int, working: Int, nonWorking: Int) {
+        switch scope {
+        case .throughToday:
+            return (presenceUnitsThroughToday, workingThroughToday, nonWorkingThroughToday)
+        case .fullYear:
+            return (presenceUnits, working, nonWorking)
+        }
     }
 }

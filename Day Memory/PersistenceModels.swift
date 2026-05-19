@@ -35,8 +35,10 @@ final class EmployerPeriod {
 @Model
 final class JournalDay {
     var id: UUID
-    /// Start-of-day in the journal calendar (unique).
-    @Attribute(.unique) var day: Date
+    /// Sort anchor: noon on this civil day in the journal timezone (see `JournalCalendar`).
+    var day: Date
+    /// ISO `yyyy-MM-dd` civil date — canonical identity, independent of device travel.
+    @Attribute(.unique) var dayKey: String?
     @Relationship(deleteRule: .cascade, inverse: \PresenceSegment.journalDay)
     var segments: [PresenceSegment]
     var trip: Trip?
@@ -45,12 +47,14 @@ final class JournalDay {
     init(
         id: UUID = UUID(),
         day: Date,
+        dayKey: String?,
         segments: [PresenceSegment] = [],
         trip: Trip? = nil,
         nonWorkingReasonRawValue: String? = nil
     ) {
         self.id = id
         self.day = day
+        self.dayKey = dayKey
         self.segments = segments
         self.trip = trip
         self.nonWorkingReasonRawValue = nonWorkingReasonRawValue
@@ -127,6 +131,14 @@ final class TripTicketImage {
 }
 
 extension JournalDay {
+    /// Stable identity for UI matching; prefers persisted `dayKey`.
+    var canonicalDayKey: String {
+        if let k = dayKey, !k.isEmpty {
+            return k
+        }
+        return JournalCalendar.dayKey(for: day)
+    }
+
     var nonWorkingReason: DayNonWorkingReason {
         get { DayNonWorkingReason(rawValue: nonWorkingReasonRawValue ?? DayNonWorkingReason.none.rawValue) ?? .none }
         set {
@@ -138,6 +150,7 @@ extension JournalDay {
         DayRecordSnapshot(
             id: id,
             day: day,
+            dayKey: canonicalDayKey,
             segments: segments.sorted { $0.sortOrder < $1.sortOrder }.map {
                 DayPresenceSegmentSnapshot(id: $0.id, countryCode: $0.countryCode, isWorking: $0.isWorking, sortOrder: $0.sortOrder)
             },

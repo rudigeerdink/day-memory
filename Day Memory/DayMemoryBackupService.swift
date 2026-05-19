@@ -26,7 +26,7 @@ enum DayMemoryBackupError: LocalizedError {
 @MainActor
 enum DayMemoryBackupService {
     static let iCloudBackupFileName = "DayMemory-backup.json"
-    static let formatVersion = 2
+    static let formatVersion = 3
 
     private static var jsonEncoder: JSONEncoder {
         let e = JSONEncoder()
@@ -44,6 +44,7 @@ enum DayMemoryBackupService {
     // MARK: - Export
 
     static func exportData(modelContext: ModelContext) throws -> Data {
+        JournalCalendar.ensurePreferenceInitialized()
         let empDesc = FetchDescriptor<EmployerPeriod>(sortBy: [SortDescriptor(\.startDate)])
         let dayDesc = FetchDescriptor<JournalDay>(sortBy: [SortDescriptor(\.day)])
 
@@ -62,6 +63,7 @@ enum DayMemoryBackupService {
             DayMemoryBackupJournalDay(
                 id: jd.id,
                 day: jd.day,
+                dayKey: jd.dayKey ?? jd.canonicalDayKey,
                 segments: jd.segments.sorted { $0.sortOrder < $1.sortOrder }.map { s in
                     DayMemoryBackupSegment(
                         id: s.id,
@@ -88,7 +90,7 @@ enum DayMemoryBackupService {
                         }
                     )
                 },
-                nonWorkingReason: jd.nonWorkingReason == .none ? nil : jd.nonWorkingReason.rawValue
+                nonWorkingReason: jd.nonWorkingReasonRawValue
             )
         }
 
@@ -113,8 +115,9 @@ enum DayMemoryBackupService {
     // MARK: - Import
 
     static func importData(_ data: Data, modelContext: ModelContext) throws {
+        JournalCalendar.ensurePreferenceInitialized()
         let envelope = try jsonDecoder.decode(DayMemoryBackupEnvelope.self, from: data)
-        guard envelope.formatVersion == 1 || envelope.formatVersion == formatVersion else {
+        guard envelope.formatVersion >= 1, envelope.formatVersion <= formatVersion else {
             throw DayMemoryBackupError.unsupportedVersion(envelope.formatVersion)
         }
 
@@ -133,12 +136,15 @@ enum DayMemoryBackupService {
         }
 
         for dto in envelope.journalDays {
+            let dayKey = dto.dayKey ?? JournalCalendar.dayKey(for: dto.day)
+            let anchor = JournalCalendar.sortAnchor(dayKey: dayKey) ?? dto.day
             let jd = JournalDay(
                 id: dto.id,
-                day: dto.day,
+                day: anchor,
+                dayKey: dayKey,
                 segments: [],
                 trip: nil,
-                nonWorkingReasonRawValue: dto.nonWorkingReason ?? DayNonWorkingReason.none.rawValue
+                nonWorkingReasonRawValue: dto.nonWorkingReason
             )
             modelContext.insert(jd)
 

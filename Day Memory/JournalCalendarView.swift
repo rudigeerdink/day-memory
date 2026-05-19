@@ -25,7 +25,7 @@ struct JournalCalendarView: View {
         let isWorking: Bool
     }
 
-    private var calendar: Calendar { .autoupdatingCurrent }
+    private var calendar: Calendar { JournalCalendar.civil }
 
     var body: some View {
         NavigationStack {
@@ -158,11 +158,13 @@ struct JournalCalendarView: View {
     }
 
     private func dayCell(_ day: Date) -> some View {
-        let normalized = ModelValidation.startOfDay(day, calendar: calendar)
-        let record = journalDays.first { ModelValidation.startOfDay($0.day, calendar: calendar) == normalized }
+        let dayKey = JournalCalendar.dayKey(for: day)
+        let normalized = JournalCalendar.normalizedStartOfDay(dayKey: dayKey)
+            ?? ModelValidation.startOfDay(day, calendar: calendar)
+        let record = journalDays.first { $0.canonicalDayKey == dayKey }
         let isToday = calendar.isDateInToday(day)
         let isSelected = focusedDay.map {
-            ModelValidation.startOfDay($0, calendar: calendar) == normalized
+            JournalCalendar.dayKey(for: $0) == dayKey
         } ?? false
 
         let accentCountryLine = emphasizeCountryLine(forNormalizedDay: normalized, record: record)
@@ -364,7 +366,8 @@ struct JournalCalendarView: View {
 
     /// Primary presence country for a day (first segment), or `nil` if unlogged.
     private func primaryCountryCode(forNormalizedDay normalized: Date) -> String? {
-        guard let jd = journalDays.first(where: { ModelValidation.startOfDay($0.day, calendar: calendar) == normalized }),
+        let dk = JournalCalendar.dayKey(for: normalized)
+        guard let jd = journalDays.first(where: { $0.canonicalDayKey == dk }),
               let first = jd.segments.sorted(by: { $0.sortOrder < $1.sortOrder }).first
         else { return nil }
         return first.countryCode
@@ -400,7 +403,8 @@ struct JournalCalendarView: View {
     private func isNaturalContinuationLandingDay(forNormalizedDay normalizedDay: Date) -> Bool {
         guard let yesterdayDate = calendar.date(byAdding: .day, value: -1, to: normalizedDay) else { return false }
         let yesterdayNorm = ModelValidation.startOfDay(yesterdayDate, calendar: calendar)
-        guard let yRecord = journalDays.first(where: { ModelValidation.startOfDay($0.day, calendar: calendar) == yesterdayNorm }) else {
+        let yKey = JournalCalendar.dayKey(for: yesterdayNorm)
+        guard let yRecord = journalDays.first(where: { $0.canonicalDayKey == yKey }) else {
             return false
         }
         let ySorted = yRecord.segments.sorted { $0.sortOrder < $1.sortOrder }
@@ -451,8 +455,8 @@ struct JournalCalendarView: View {
 
     private func visibleCountryCodesInMonth() -> [String] {
         monthDates().reduce(into: Set<String>()) { acc, day in
-            let normalized = ModelValidation.startOfDay(day, calendar: calendar)
-            guard let record = journalDays.first(where: { ModelValidation.startOfDay($0.day, calendar: calendar) == normalized }) else {
+            let dk = JournalCalendar.dayKey(for: day)
+            guard let record = journalDays.first(where: { $0.canonicalDayKey == dk }) else {
                 return
             }
             for segment in record.segments {

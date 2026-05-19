@@ -10,6 +10,11 @@ import SwiftUI
 
 @main
 struct Day_MemoryApp: App {
+    init() {
+        JournalCalendar.ensurePreferenceInitialized()
+        try? JournalCalendar.migrateJournalDayKeys(modelContext: Self.sharedModelContainer.mainContext)
+    }
+
     /// Local SQLite only. CloudKit-backed SwiftData requires optional properties/relationships, no unique
     /// constraints, and optional inverse relations — our schema is not CloudKit-compatible. iCloud Documents
     /// backup (JSON) remains available separately.
