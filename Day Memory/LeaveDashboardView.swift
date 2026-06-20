@@ -178,30 +178,54 @@ struct LeaveDashboardView: View {
                     }
                 }
 
-                VStack(spacing: 6) {
-                    Text("Balance")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .tracking(0.6)
-
-                    Text(balanceLabel(balance))
-                        .font(.system(size: 36, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(balanceTint(balance))
-
-                    Text("days vs pro-rated entitlement")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-
                 HStack(spacing: 0) {
-                    compactStat(title: "Awarded", subtitle: "pro-rated", value: awardedInt, accent: awardedColor)
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(width: 1, height: 36)
-                    compactStat(title: "Consumed", subtitle: "annual leave", value: consumed, accent: consumedColor)
+                    leaveStatColumn(
+                        label: {
+                            Text("Balance")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .tracking(0.6)
+                                .lineLimit(1)
+                        },
+                        value: balanceLabel(balance),
+                        valueColor: balanceTint(balance),
+                        caption: "days vs pro-rated"
+                    )
+                    statDivider
+                    leaveStatColumn(
+                        label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(awardedColor)
+                                    .frame(width: 6, height: 6)
+                                Text("Awarded")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        },
+                        value: "\(awardedInt)",
+                        valueColor: .primary,
+                        caption: "pro-rated"
+                    )
+                    statDivider
+                    leaveStatColumn(
+                        label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(consumedColor)
+                                    .frame(width: 6, height: 6)
+                                Text("Consumed")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        },
+                        value: "\(consumed)",
+                        valueColor: .primary,
+                        caption: "annual leave"
+                    )
                 }
                 .padding(.vertical, 4)
 
@@ -270,23 +294,35 @@ struct LeaveDashboardView: View {
         }
     }
 
-    private func compactStat(title: String, subtitle: String, value: Int, accent: Color) -> some View {
+    private let statLabelRowHeight: CGFloat = 16
+
+    private var statDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.06))
+            .frame(width: 1, height: 52)
+    }
+
+    private func leaveStatColumn<Label: View>(
+        @ViewBuilder label: () -> Label,
+        value: String,
+        valueColor: Color,
+        caption: String
+    ) -> some View {
         VStack(spacing: 4) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(accent)
-                    .frame(width: 6, height: 6)
-                Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            Text("\(value)")
+            label()
+                .frame(maxWidth: .infinity)
+                .frame(height: statLabelRowHeight)
+
+            Text(value)
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(.primary)
-            Text(subtitle)
+                .foregroundStyle(valueColor)
+
+            Text(caption)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity)
     }
@@ -309,14 +345,14 @@ struct LeaveDashboardView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(awardedColor.opacity(0.2))
-                        .frame(height: 5)
+                        .fill(awardedColor.opacity(0.55))
+                        .frame(height: 6)
                     Capsule()
                         .fill(consumedColor.opacity(0.92))
-                        .frame(width: max(2, geo.size.width * fillRatio), height: 5)
+                        .frame(width: max(2, geo.size.width * fillRatio), height: 6)
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
 
             HStack(spacing: 3) {
                 Text("\(Int(awarded.rounded()))")

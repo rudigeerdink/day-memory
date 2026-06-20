@@ -97,6 +97,13 @@ struct YearOverviewView: View {
                         .padding(.vertical, 20)
                     }
 
+                    if !report.yearTotalsByCountry.isEmpty {
+                        sectionTitle("By presence location")
+                        ForEach(report.yearTotalsByCountry, id: \.self) { row in
+                            locationCard(row)
+                        }
+                    }
+
                     sectionTitle("By employer country")
                     if report.employerSlices.isEmpty {
                         ContentUnavailableView(
@@ -109,13 +116,6 @@ struct YearOverviewView: View {
                     } else {
                         ForEach(report.employerSlices) { slice in
                             employerCard(slice)
-                        }
-                    }
-
-                    if !report.yearTotalsByCountry.isEmpty {
-                        sectionTitle("By presence location")
-                        ForEach(report.yearTotalsByCountry, id: \.self) { row in
-                            locationCard(row)
                         }
                     }
 

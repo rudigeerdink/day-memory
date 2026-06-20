@@ -44,6 +44,7 @@ struct EmployerPeriodsView: View {
                             }
                             .padding(.vertical, 4)
                         }
+                        .buttonStyle(.plain)
                     }
                     .onDelete(perform: delete)
                 }

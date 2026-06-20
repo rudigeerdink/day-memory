@@ -12,6 +12,9 @@ struct JournalCalendarView: View {
     @Query(sort: \EmployerPeriod.startDate) private var employerPeriods: [EmployerPeriod]
 
     @State private var visibleMonth: Date = .now
+    @State private var monthDragOffset: CGFloat = 0
+    @State private var monthPageWidth: CGFloat = 0
+    @GestureState private var pagerDrag = PagerDrag()
     /// Persists after the day sheet closes so week apply still knows which week to use (`sheet(item:)` clears `selection` on dismiss).
     @State private var focusedDay: Date?
     @State private var selection: JournalDaySelection?
@@ -25,20 +28,29 @@ struct JournalCalendarView: View {
         let isWorking: Bool
     }
 
+    private struct MonthGridSlot: Identifiable {
+        let id: String
+        let day: Date?
+    }
+
+    private struct PagerDrag: Equatable {
+        var isHorizontal = false
+        var translation: CGFloat = 0
+    }
+
     private var calendar: Calendar { JournalCalendar.civil }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    monthHeader
-                    weekdaySymbolsRow
-                    monthGrid
-                    monthColorLegend
+            VStack(alignment: .leading, spacing: 20) {
+                monthCalendarContent
+                    .padding(.horizontal, 16)
+                ScrollView {
                     weekActions
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .scrollDisabled(pagerDrag.isHorizontal)
             }
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
@@ -77,10 +89,126 @@ struct JournalCalendarView: View {
         }
     }
 
-    private var monthHeader: some View {
+    private var monthCalendarContent: some View {
+        GeometryReader { geometry in
+            let pageWidth = geometry.size.width
+            let previousMonth = adjacentMonth(to: visibleMonth, by: -1)
+            let nextMonth = adjacentMonth(to: visibleMonth, by: 1)
+
+            HStack(alignment: .top, spacing: 0) {
+                monthPage(month: previousMonth, pageWidth: pageWidth)
+                    .id(monthPageID(previousMonth))
+                monthPage(month: visibleMonth, pageWidth: pageWidth)
+                    .id(monthPageID(visibleMonth))
+                monthPage(month: nextMonth, pageWidth: pageWidth)
+                    .id(monthPageID(nextMonth))
+            }
+            .offset(x: -pageWidth + monthDragOffset + pagerDrag.translation)
+            .frame(width: pageWidth * 3, alignment: .leading)
+            .frame(width: pageWidth, alignment: .leading)
+            .clipped()
+            .contentShape(Rectangle())
+            .highPriorityGesture(monthPagerDragGesture(pageWidth: pageWidth))
+            .onAppear {
+                monthPageWidth = pageWidth
+            }
+            .onChange(of: pageWidth) { _, newWidth in
+                monthPageWidth = newWidth
+            }
+        }
+        .frame(height: monthPagerHeight(for: visibleMonth))
+    }
+
+    private func monthPage(month: Date, pageWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            monthHeader(for: month)
+            weekdaySymbolsRow
+            monthGrid(for: month)
+            monthColorLegend(for: month)
+        }
+        .frame(width: pageWidth, alignment: .leading)
+    }
+
+    private func monthPageID(_ month: Date) -> String {
+        JournalCalendar.dayKey(for: normalizedMonthStart(for: month))
+    }
+
+    private func monthPagerDragGesture(pageWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .updating($pagerDrag) { value, state, _ in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > abs(vertical), abs(horizontal) > 6 else { return }
+                state = PagerDrag(isHorizontal: true, translation: horizontal)
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > abs(vertical), abs(horizontal) > 6 else { return }
+
+                monthDragOffset += horizontal
+                let projected = value.predictedEndTranslation.width
+                let threshold = pageWidth * 0.22
+                if projected < -threshold {
+                    completeMonthPageTransition(by: 1, pageWidth: pageWidth)
+                } else if projected > threshold {
+                    completeMonthPageTransition(by: -1, pageWidth: pageWidth)
+                } else {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        monthDragOffset = 0
+                    }
+                }
+            }
+    }
+
+    private func shiftMonth(by delta: Int) {
+        let width = monthPageWidth
+        guard width > 0 else {
+            applyMonthChange(by: delta)
+            return
+        }
+        completeMonthPageTransition(by: delta, pageWidth: width)
+    }
+
+    private func completeMonthPageTransition(by delta: Int, pageWidth: CGFloat) {
+        withAnimation(.easeOut(duration: 0.26)) {
+            monthDragOffset = -CGFloat(delta) * pageWidth
+        } completion: {
+            applyMonthChange(by: delta)
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                monthDragOffset = 0
+            }
+        }
+    }
+
+    private func applyMonthChange(by delta: Int) {
+        let anchor = normalizedMonthStart(for: visibleMonth)
+        visibleMonth = calendar.date(byAdding: .month, value: delta, to: anchor) ?? visibleMonth
+    }
+
+    private func normalizedMonthStart(for month: Date) -> Date {
+        calendar.date(from: calendar.dateComponents([.year, .month], from: month)) ?? month
+    }
+
+    private func adjacentMonth(to month: Date, by delta: Int) -> Date {
+        let start = normalizedMonthStart(for: month)
+        return calendar.date(byAdding: .month, value: delta, to: start) ?? start
+    }
+
+    private func monthPagerHeight(for month: Date) -> CGFloat {
+        let rowCount = max(1, daysForMonthGrid(month: month).count / 7)
+        let gridHeight = CGFloat(rowCount) * 62
+        let legendItems = monthLegendItems(from: visibleCountryCodesInMonth(month: month))
+        let legendHeight = legendItems.isEmpty ? 0 : CGFloat(max(1, legendItems.count / 2)) * 28
+        return 52 + 18 + gridHeight + legendHeight + 12
+    }
+
+    private func monthHeader(for month: Date) -> some View {
         HStack {
             Button {
-                visibleMonth = calendar.date(byAdding: .month, value: -1, to: visibleMonth) ?? visibleMonth
+                shiftMonth(by: -1)
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
@@ -89,13 +217,13 @@ struct JournalCalendarView: View {
 
             Spacer()
 
-            Text(visibleMonth, format: .dateTime.month(.wide).year())
+            Text(month, format: .dateTime.month(.wide).year())
                 .font(.title2.weight(.semibold))
 
             Spacer()
 
             Button {
-                visibleMonth = calendar.date(byAdding: .month, value: 1, to: visibleMonth) ?? visibleMonth
+                shiftMonth(by: 1)
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.body.weight(.semibold))
@@ -119,12 +247,19 @@ struct JournalCalendarView: View {
         }
     }
 
-    private var monthGrid: some View {
-        let days = daysForMonthGrid()
+    private func monthGridSlots(for month: Date) -> [MonthGridSlot] {
+        let monthID = monthPageID(month)
+        return daysForMonthGrid(month: month).enumerated().map { index, day in
+            MonthGridSlot(id: "\(monthID)-\(index)", day: day)
+        }
+    }
+
+    private func monthGrid(for month: Date) -> some View {
+        let slots = monthGridSlots(for: month)
         let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
         return LazyVGrid(columns: columns, spacing: 6) {
-            ForEach(days, id: \.self) { day in
-                if let day {
+            ForEach(slots) { slot in
+                if let day = slot.day {
                     dayCell(day)
                 } else {
                     Color.clear
@@ -134,8 +269,8 @@ struct JournalCalendarView: View {
         }
     }
 
-    private var monthColorLegend: some View {
-        let codes = visibleCountryCodesInMonth()
+    private func monthColorLegend(for month: Date) -> some View {
+        let codes = visibleCountryCodesInMonth(month: month)
         let items = monthLegendItems(from: codes)
         return Group {
             if !items.isEmpty {
@@ -177,81 +312,83 @@ struct JournalCalendarView: View {
         let isUnfilled = journalIsUnfilled(record)
         let showPastUnfilled = isPastDay && isUnfilled
 
-        return Button {
-            focusedDay = normalized
-            selection = JournalDaySelection(day: normalized)
-        } label: {
-            ZStack {
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.08) : Color(.secondarySystemGroupedBackground))
+            if let reasonTint {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Color.primary.opacity(0.08) : Color(.secondarySystemGroupedBackground))
-                if let reasonTint {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(reasonTint)
-                }
-                VStack(spacing: 4) {
-                    Text("\(calendar.component(.day, from: day))")
-                        .font(.body.weight(isToday ? .bold : .regular))
-                    if let record, let countryLine = gridCountryLabel(for: record) {
-                        VStack(spacing: 4) {
-                            Text(countryLine)
-                                .font(.caption2.weight(accentCountryLine ? .semibold : .medium))
-                                .foregroundStyle(accentCountryLine ? Color.primary : Color.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
+                    .fill(reasonTint)
+            }
+            VStack(spacing: 4) {
+                Text("\(calendar.component(.day, from: day))")
+                    .font(.body.weight(isToday ? .bold : .regular))
+                if let record, let countryLine = gridCountryLabel(for: record) {
+                    VStack(spacing: 4) {
+                        Text(countryLine)
+                            .font(.caption2.weight(accentCountryLine ? .semibold : .medium))
+                            .foregroundStyle(accentCountryLine ? Color.primary : Color.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
 
-                            HStack(spacing: 4) {
-                                ForEach(gridSegments(for: record), id: \.id) { segment in
-                                    Circle()
-                                        .fill(countryDotColor(countryCode: segment.countryCode, isWorking: segment.isWorking))
-                                        .frame(width: 6, height: 6)
-                                }
+                        HStack(spacing: 4) {
+                            ForEach(gridSegments(for: record), id: \.id) { segment in
+                                Circle()
+                                    .fill(countryDotColor(countryCode: segment.countryCode, isWorking: segment.isWorking))
+                                    .frame(width: 6, height: 6)
                             }
                         }
-                    } else {
-                        Circle()
-                            .fill(Color.clear)
-                            .frame(width: 4, height: 4)
                     }
-                }
-                .padding(.vertical, 6)
-            }
-            .overlay(alignment: .leading) {
-                if accentCountryLine, record != nil {
-                    RoundedRectangle(cornerRadius: 1, style: .continuous)
-                        .fill(transitionStyle)
-                        .frame(width: 2)
-                        .padding(.leading, 4)
-                        .padding(.vertical, 10)
-                        .allowsHitTesting(false)
+                } else {
+                    Circle()
+                        .fill(Color.clear)
+                        .frame(width: 4, height: 4)
                 }
             }
-            .overlay(alignment: .bottom) {
-                if workAwayFromEmployer {
-                    Rectangle()
-                        .fill(Color.yellow.opacity(0.92))
-                        .frame(height: 2)
-                        .padding(.horizontal, 7)
-                        .padding(.bottom, 3)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                } else if showPastUnfilled {
-                    Rectangle()
-                        .fill(Color.red.opacity(0.85))
-                        .frame(height: 2)
-                        .padding(.horizontal, 7)
-                        .padding(.bottom, 3)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-            .overlay {
-                if isToday {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
-                }
+            .padding(.vertical, 6)
+        }
+        .overlay(alignment: .leading) {
+            if accentCountryLine, record != nil {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(transitionStyle)
+                    .frame(width: 2)
+                    .padding(.leading, 4)
+                    .padding(.vertical, 10)
+                    .allowsHitTesting(false)
             }
         }
-        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) {
+            if workAwayFromEmployer {
+                Rectangle()
+                    .fill(Color.yellow.opacity(0.92))
+                    .frame(height: 2)
+                    .padding(.horizontal, 7)
+                    .padding(.bottom, 3)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            } else if showPastUnfilled {
+                Rectangle()
+                    .fill(Color.red.opacity(0.85))
+                    .frame(height: 2)
+                    .padding(.horizontal, 7)
+                    .padding(.bottom, 3)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .overlay {
+            if isToday {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            focusedDay = normalized
+            selection = JournalDaySelection(day: normalized)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Day \(calendar.component(.day, from: day))")
         .frame(height: 56)
     }
 
@@ -307,25 +444,41 @@ struct JournalCalendarView: View {
     /// Stable per-country hue: darker for working, lighter for non-working.
     private func countryDotColor(countryCode: String, isWorking: Bool) -> Color {
         let normalized = countryCode.uppercased()
-        // Brand-guided country palette for common locations.
-        let base: Color
-        switch normalized {
-        case "NL":
-            base = .green
-        case "AE":
-            base = .blue
-        case "ES":
-            base = .red
-        default:
-            // Deterministic fallback hue for other countries.
-            let hash = normalized.unicodeScalars.reduce(0) { acc, scalar in
-                ((acc * 31) &+ Int(scalar.value)) & 0x7fffffff
-            }
-            let hue = Double(hash % 360) / 360.0
-            base = Color(hue: hue, saturation: 0.62, brightness: 0.78)
-        }
-
+        let base = Self.countryBaseColors[normalized] ?? Self.fallbackCountryColor(for: normalized)
         return base.opacity(isWorking ? 0.95 : 0.45)
+    }
+
+    /// Distinct basic colors for common countries (`Countries.common` order).
+    private static let countryBaseColors: [String: Color] = [
+        "NL": .green,
+        "DE": .orange,
+        "BE": .yellow,
+        "FR": .red,
+        "GB": .blue,
+        "IE": .cyan,
+        "ES": .purple,
+        "PT": .pink,
+        "IT": Color(hue: 0.12, saturation: 0.72, brightness: 0.82),
+        "CH": .indigo,
+        "AT": .brown,
+        "US": Color(hue: 0.52, saturation: 0.62, brightness: 0.76),
+        "CA": Color(hue: 0.88, saturation: 0.56, brightness: 0.78),
+        "AU": Color(hue: 0.07, saturation: 0.78, brightness: 0.86),
+        "NZ": Color(hue: 0.62, saturation: 0.52, brightness: 0.72),
+        "JP": Color(hue: 0.95, saturation: 0.48, brightness: 0.76),
+        "SG": Color(hue: 0.72, saturation: 0.58, brightness: 0.75),
+        "AE": .blue,
+    ]
+
+    /// Evenly spaced hues for countries not in the explicit palette.
+    private static func fallbackCountryColor(for code: String) -> Color {
+        let hash = code.unicodeScalars.reduce(0) { acc, scalar in
+            ((acc * 31) &+ Int(scalar.value)) & 0x7fffffff
+        }
+        let paletteCount = 12
+        let index = hash % paletteCount
+        let hue = (Double(index) + 0.5) / Double(paletteCount)
+        return Color(hue: hue, saturation: 0.65, brightness: 0.78)
     }
 
     /// Vertical indicator style on country-change days:
@@ -433,9 +586,9 @@ struct JournalCalendarView: View {
         .padding(.top, 8)
     }
 
-    private func daysForMonthGrid() -> [Date?] {
-        guard let dayRange = calendar.range(of: .day, in: .month, for: visibleMonth),
-              let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: visibleMonth))
+    private func daysForMonthGrid(month: Date) -> [Date?] {
+        guard let dayRange = calendar.range(of: .day, in: .month, for: month),
+              let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: month))
         else { return [] }
 
         let firstWeekday = calendar.component(.weekday, from: firstOfMonth)
@@ -453,8 +606,8 @@ struct JournalCalendarView: View {
         return days
     }
 
-    private func visibleCountryCodesInMonth() -> [String] {
-        monthDates().reduce(into: Set<String>()) { acc, day in
+    private func visibleCountryCodesInMonth(month: Date) -> [String] {
+        monthDates(month: month).reduce(into: Set<String>()) { acc, day in
             let dk = JournalCalendar.dayKey(for: day)
             guard let record = journalDays.first(where: { $0.canonicalDayKey == dk }) else {
                 return
@@ -466,9 +619,9 @@ struct JournalCalendarView: View {
         .sorted()
     }
 
-    private func monthDates() -> [Date] {
-        guard let dayRange = calendar.range(of: .day, in: .month, for: visibleMonth),
-              let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: visibleMonth))
+    private func monthDates(month: Date) -> [Date] {
+        guard let dayRange = calendar.range(of: .day, in: .month, for: month),
+              let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: month))
         else { return [] }
 
         return dayRange.compactMap { day in
