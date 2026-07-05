@@ -10,9 +10,14 @@ struct EmployerPeriodsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \EmployerPeriod.startDate) private var periods: [EmployerPeriod]
 
+    /// Sheet content must not depend on a separate flag + optional model (race → empty sheet).
+    private struct EditingEmployerPeriod: Identifiable {
+        var id: UUID { period.id }
+        let period: EmployerPeriod
+    }
+
     @State private var showAdd = false
-    @State private var showEditSheet = false
-    @State private var editing: EmployerPeriod?
+    @State private var editing: EditingEmployerPeriod?
     @State private var deleteError: String?
     @State private var showDeleteError = false
 
@@ -28,8 +33,7 @@ struct EmployerPeriodsView: View {
                 } else {
                     ForEach(periods, id: \.id) { period in
                         Button {
-                            editing = period
-                            showEditSheet = true
+                            editing = EditingEmployerPeriod(period: period)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(period.companyName)
@@ -66,11 +70,9 @@ struct EmployerPeriodsView: View {
                 }
                 .environment(\.modelContext, modelContext)
             }
-            .sheet(isPresented: $showEditSheet, onDismiss: { editing = nil }) {
+            .sheet(item: $editing) { selection in
                 NavigationStack {
-                    if let period = editing {
-                        EmployerPeriodForm(period: period)
-                    }
+                    EmployerPeriodForm(period: selection.period)
                 }
                 .environment(\.modelContext, modelContext)
             }
@@ -99,6 +101,8 @@ struct EmployerPeriodsView: View {
 struct EmployerPeriodForm: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \JournalDay.day) private var journalDays: [JournalDay]
+    @Query(sort: \EmployerPeriod.startDate) private var employerPeriods: [EmployerPeriod]
 
     private var calendar: Calendar { JournalCalendar.civil }
 
@@ -106,7 +110,7 @@ struct EmployerPeriodForm: View {
     var period: EmployerPeriod?
 
     @State private var companyName = ""
-    @State private var countryCode = "NL"
+    @State private var countryCode = Countries.deviceRegionCode
     @State private var startDate = Date.now
     @State private var endDate = Date.now
     @State private var annualLeaveEntitlementDays = 0
@@ -118,11 +122,15 @@ struct EmployerPeriodForm: View {
         Form {
             Section("Employer") {
                 TextField("Company name", text: $companyName)
-                Picker("Employer country", selection: $countryCode) {
-                    ForEach(Countries.common, id: \.code) { c in
-                        Text("\(c.name) (\(c.code))").tag(c.code)
-                    }
-                }
+                CountryPicker(
+                    title: "Employer country",
+                    selection: $countryCode,
+                    frequentCodes: Countries.frequentCodes(
+                        journalDays: journalDays,
+                        employerPeriods: employerPeriods,
+                        including: countryCode
+                    )
+                )
             }
             Section("Period") {
                 DatePicker("Start", selection: $startDate, displayedComponents: .date)

@@ -234,7 +234,7 @@ enum YearOverviewAggregator {
 
 enum CountryDisplay {
     static func name(for code: String) -> String {
-        Countries.common.first { $0.code == code }?.name ?? code
+        Countries.name(for: code)
     }
 }
 

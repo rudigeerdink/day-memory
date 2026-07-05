@@ -31,6 +31,12 @@ enum JournalCalendar {
         return c
     }
 
+    /// First instant of the civil month containing `date`.
+    static func monthStart(for date: Date) -> Date {
+        let c = civil
+        return c.date(from: c.dateComponents([.year, .month], from: date)) ?? date
+    }
+
     static func setCivilTimeZone(identifier: String, modelContext: ModelContext) throws {
         UserDefaults.standard.set(identifier, forKey: timeZonePreferenceKey)
         try reanchorAllJournalDays(modelContext: modelContext)

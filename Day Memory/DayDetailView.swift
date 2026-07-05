@@ -11,6 +11,8 @@ import UIKit
 struct DayDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \JournalDay.day) private var journalDays: [JournalDay]
+    @Query(sort: \EmployerPeriod.startDate) private var employerPeriods: [EmployerPeriod]
 
     let day: Date
     let defaultFallbackCountry: String
@@ -43,14 +45,22 @@ struct DayDetailView: View {
         Form {
             Section("This day") {
                 Text(day, format: .dateTime.weekday(.wide).day().month(.abbreviated).year())
-                countryPicker(title: "Country", selection: $country0)
+                CountryPicker(
+                    title: "Country",
+                    selection: $country0,
+                    frequentCodes: frequentCountryCodes(including: country0)
+                )
                 Toggle("Working", isOn: $working0)
             }
 
             Section("Travel (same calendar day, two countries)") {
                 Toggle("Split across two countries", isOn: $splitTravelDay)
                 if splitTravelDay {
-                    countryPicker(title: "Second country", selection: $country1)
+                    CountryPicker(
+                        title: "Second country",
+                        selection: $country1,
+                        frequentCodes: frequentCountryCodes(including: country1)
+                    )
                     Toggle("Working in second country", isOn: $working1)
                 }
             }
@@ -67,11 +77,19 @@ struct DayDetailView: View {
                 TextField("Flight number", text: $flight)
                     .textInputAutocapitalization(.characters)
 
-                TextField("Departure country (optional)", text: $depCountry)
-                    .textInputAutocapitalization(.characters)
+                CountryPicker(
+                    title: "Departure country (optional)",
+                    selection: $depCountry,
+                    frequentCodes: frequentCountryCodes(including: depCountry),
+                    allowsEmpty: true
+                )
 
-                TextField("Arrival country (optional)", text: $arrCountry)
-                    .textInputAutocapitalization(.characters)
+                CountryPicker(
+                    title: "Arrival country (optional)",
+                    selection: $arrCountry,
+                    frequentCodes: frequentCountryCodes(including: arrCountry),
+                    allowsEmpty: true
+                )
 
                 Text("Automatic flight lookup can plug in here later.")
                     .font(.footnote)
@@ -146,12 +164,12 @@ struct DayDetailView: View {
         }
     }
 
-    private func countryPicker(title: String, selection: Binding<String>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(Countries.common, id: \.code) { c in
-                Text("\(c.name) (\(c.code))").tag(c.code)
-            }
-        }
+    private func frequentCountryCodes(including code: String) -> [String] {
+        Countries.frequentCodes(
+            journalDays: journalDays,
+            employerPeriods: employerPeriods,
+            including: code
+        )
     }
 
     private func load() {

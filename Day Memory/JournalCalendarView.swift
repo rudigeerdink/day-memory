@@ -11,7 +11,7 @@ struct JournalCalendarView: View {
     @Query(sort: \JournalDay.day) private var journalDays: [JournalDay]
     @Query(sort: \EmployerPeriod.startDate) private var employerPeriods: [EmployerPeriod]
 
-    @State private var visibleMonth: Date = .now
+    @State private var visibleMonth: Date = JournalCalendar.monthStart(for: .now)
     @State private var monthDragOffset: CGFloat = 0
     @State private var monthPageWidth: CGFloat = 0
     @GestureState private var pagerDrag = PagerDrag()
@@ -21,7 +21,8 @@ struct JournalCalendarView: View {
     @State private var showApplyWeekConfirm = false
     @State private var applyError: String?
     @State private var showApplyError = false
-    @State private var fallbackCountry: String = "NL"
+    @State private var fallbackCountry: String = Countries.deviceRegionCode
+    @State private var showFallbackCountryPicker = false
 
     private struct MonthLegendItem: Hashable {
         let countryCode: String
@@ -56,17 +57,26 @@ struct JournalCalendarView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Fallback country", selection: $fallbackCountry) {
-                            ForEach(Countries.common, id: \.code) { item in
-                                Text("\(item.name) (\(item.code))").tag(item.code)
-                            }
-                        }
+                    Button {
+                        showFallbackCountryPicker = true
                     } label: {
                         Image(systemName: "globe")
                     }
                     .accessibilityLabel("Fallback country for new weeks")
                 }
+            }
+            .sheet(isPresented: $showFallbackCountryPicker) {
+                NavigationStack {
+                    CountryPickerSheet(
+                        selection: $fallbackCountry,
+                        frequentCodes: Countries.frequentCodes(
+                            journalDays: journalDays,
+                            employerPeriods: employerPeriods,
+                            including: fallbackCountry
+                        )
+                    )
+                }
+                .presentationDetents([.medium, .large])
             }
             .sheet(item: $selection) { sel in
                 NavigationStack {
@@ -90,6 +100,14 @@ struct JournalCalendarView: View {
     }
 
     private var monthCalendarContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            monthHeader
+            weekdaySymbolsRow
+            monthPager
+        }
+    }
+
+    private var monthPager: some View {
         GeometryReader { geometry in
             let pageWidth = geometry.size.width
             let previousMonth = adjacentMonth(to: visibleMonth, by: -1)
@@ -121,8 +139,6 @@ struct JournalCalendarView: View {
 
     private func monthPage(month: Date, pageWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            monthHeader(for: month)
-            weekdaySymbolsRow
             monthGrid(for: month)
             monthColorLegend(for: month)
         }
@@ -174,10 +190,10 @@ struct JournalCalendarView: View {
         withAnimation(.easeOut(duration: 0.26)) {
             monthDragOffset = -CGFloat(delta) * pageWidth
         } completion: {
-            applyMonthChange(by: delta)
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
+                applyMonthChange(by: delta)
                 monthDragOffset = 0
             }
         }
@@ -202,10 +218,11 @@ struct JournalCalendarView: View {
         let gridHeight = CGFloat(rowCount) * 62
         let legendItems = monthLegendItems(from: visibleCountryCodesInMonth(month: month))
         let legendHeight = legendItems.isEmpty ? 0 : CGFloat(max(1, legendItems.count / 2)) * 28
-        return 52 + 18 + gridHeight + legendHeight + 12
+        let legendSpacing = legendItems.isEmpty ? 0 : CGFloat(20)
+        return gridHeight + legendSpacing + legendHeight
     }
 
-    private func monthHeader(for month: Date) -> some View {
+    private var monthHeader: some View {
         HStack {
             Button {
                 shiftMonth(by: -1)
@@ -217,8 +234,9 @@ struct JournalCalendarView: View {
 
             Spacer()
 
-            Text(month, format: .dateTime.month(.wide).year())
+            Text(visibleMonth, format: .dateTime.month(.wide).year())
                 .font(.title2.weight(.semibold))
+                .id(monthPageID(visibleMonth))
 
             Spacer()
 
@@ -237,7 +255,7 @@ struct JournalCalendarView: View {
         let symbols = calendar.shortWeekdaySymbols
         let first = calendar.firstWeekday - 1
         let ordered = Array(symbols[first...] + symbols[..<first])
-        return HStack(spacing: 0) {
+        return HStack(spacing: 6) {
             ForEach(Array(ordered.enumerated()), id: \.offset) { _, sym in
                 Text(sym.uppercased())
                     .font(.caption2.weight(.medium))
@@ -263,7 +281,7 @@ struct JournalCalendarView: View {
                     dayCell(day)
                 } else {
                     Color.clear
-                        .frame(height: 44)
+                        .frame(height: 56)
                 }
             }
         }
@@ -282,7 +300,7 @@ struct JournalCalendarView: View {
                     ) {
                         ForEach(items, id: \.self) { item in
                             legendDot(
-                                color: countryDotColor(countryCode: item.countryCode, isWorking: item.isWorking),
+                                color: CountryColors.dotColor(countryCode: item.countryCode, isWorking: item.isWorking),
                                 label: "\(item.countryCode) \(item.isWorking ? "working" : "non-working")"
                             )
                         }
@@ -333,7 +351,7 @@ struct JournalCalendarView: View {
                         HStack(spacing: 4) {
                             ForEach(gridSegments(for: record), id: \.id) { segment in
                                 Circle()
-                                    .fill(countryDotColor(countryCode: segment.countryCode, isWorking: segment.isWorking))
+                                    .fill(CountryColors.dotColor(countryCode: segment.countryCode, isWorking: segment.isWorking))
                                     .frame(width: 6, height: 6)
                             }
                         }
@@ -441,46 +459,6 @@ struct JournalCalendarView: View {
         record.segments.sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    /// Stable per-country hue: darker for working, lighter for non-working.
-    private func countryDotColor(countryCode: String, isWorking: Bool) -> Color {
-        let normalized = countryCode.uppercased()
-        let base = Self.countryBaseColors[normalized] ?? Self.fallbackCountryColor(for: normalized)
-        return base.opacity(isWorking ? 0.95 : 0.45)
-    }
-
-    /// Distinct basic colors for common countries (`Countries.common` order).
-    private static let countryBaseColors: [String: Color] = [
-        "NL": .green,
-        "DE": .orange,
-        "BE": .yellow,
-        "FR": .red,
-        "GB": .blue,
-        "IE": .cyan,
-        "ES": .purple,
-        "PT": .pink,
-        "IT": Color(hue: 0.12, saturation: 0.72, brightness: 0.82),
-        "CH": .indigo,
-        "AT": .brown,
-        "US": Color(hue: 0.52, saturation: 0.62, brightness: 0.76),
-        "CA": Color(hue: 0.88, saturation: 0.56, brightness: 0.78),
-        "AU": Color(hue: 0.07, saturation: 0.78, brightness: 0.86),
-        "NZ": Color(hue: 0.62, saturation: 0.52, brightness: 0.72),
-        "JP": Color(hue: 0.95, saturation: 0.48, brightness: 0.76),
-        "SG": Color(hue: 0.72, saturation: 0.58, brightness: 0.75),
-        "AE": .blue,
-    ]
-
-    /// Evenly spaced hues for countries not in the explicit palette.
-    private static func fallbackCountryColor(for code: String) -> Color {
-        let hash = code.unicodeScalars.reduce(0) { acc, scalar in
-            ((acc * 31) &+ Int(scalar.value)) & 0x7fffffff
-        }
-        let paletteCount = 12
-        let index = hash % paletteCount
-        let hue = (Double(index) + 0.5) / Double(paletteCount)
-        return Color(hue: hue, saturation: 0.65, brightness: 0.78)
-    }
-
     /// Vertical indicator style on country-change days:
     /// - Single-country day: arriving segment color.
     /// - Split day: gradient from departure segment to arrival segment.
@@ -491,8 +469,8 @@ struct JournalCalendarView: View {
 
         if sorted.count >= 2 {
             let second = sorted[1]
-            let depart = countryDotColor(countryCode: first.countryCode, isWorking: first.isWorking)
-            let arrive = countryDotColor(countryCode: second.countryCode, isWorking: second.isWorking)
+            let depart = CountryColors.dotColor(countryCode: first.countryCode, isWorking: first.isWorking)
+            let arrive = CountryColors.dotColor(countryCode: second.countryCode, isWorking: second.isWorking)
             return AnyShapeStyle(
                 LinearGradient(
                     colors: [depart, arrive],
@@ -502,7 +480,7 @@ struct JournalCalendarView: View {
             )
         }
 
-        return AnyShapeStyle(countryDotColor(countryCode: first.countryCode, isWorking: first.isWorking))
+        return AnyShapeStyle(CountryColors.dotColor(countryCode: first.countryCode, isWorking: first.isWorking))
     }
 
     private func nonWorkingReasonTint(for record: JournalDay?) -> Color? {
