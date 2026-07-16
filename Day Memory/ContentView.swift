@@ -28,7 +28,7 @@ struct ContentView: View {
                 .tabItem { Label("Employers", systemImage: "building.2") }
 
             BackupSettingsView()
-                .tabItem { Label("Backup", systemImage: "externaldrive") }
+                .tabItem { Label("Manage", systemImage: "gearshape.2") }
         }
         .task {
             await JournalMonthGapNotifier.refresh(modelContext: modelContext)

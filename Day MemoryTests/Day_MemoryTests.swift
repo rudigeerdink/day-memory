@@ -101,4 +101,82 @@ struct Day_MemoryTests {
         #expect(byId[j3.id] == DayNonWorkingReason.none)
     }
 
+    @MainActor
+    @Test func yearPresenceReportIncludesSplitDaysAndTravel() throws {
+        let schema = Schema([
+            EmployerPeriod.self,
+            JournalDay.self,
+            PresenceSegment.self,
+            Trip.self,
+            TripTicketImage.self,
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
+        )
+        let context = container.mainContext
+
+        let tzKey = JournalCalendar.timeZonePreferenceKey
+        let previousTZ = UserDefaults.standard.string(forKey: tzKey)
+        defer {
+            if let previousTZ {
+                UserDefaults.standard.set(previousTZ, forKey: tzKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: tzKey)
+            }
+        }
+        UserDefaults.standard.set("UTC", forKey: tzKey)
+        JournalCalendar.ensurePreferenceInitialized()
+        let cal = JournalCalendar.civil
+
+        var comps = DateComponents()
+        comps.year = 2025
+        comps.month = 6
+        comps.day = 10
+        let dayDate = cal.date(from: comps)!
+        let dayKey = JournalCalendar.dayKey(for: dayDate)
+        let anchor = JournalCalendar.sortAnchor(dayKey: dayKey)!
+
+        let journal = JournalDay(day: anchor, dayKey: dayKey, nonWorkingReasonRawValue: nil)
+        context.insert(journal)
+
+        let seg1 = PresenceSegment(countryCode: "NL", isWorking: true, sortOrder: 0, journalDay: journal)
+        let seg2 = PresenceSegment(countryCode: "AE", isWorking: false, sortOrder: 1, journalDay: journal)
+        journal.segments = [seg1, seg2]
+        context.insert(seg1)
+        context.insert(seg2)
+
+        let trip = Trip(
+            flightDesignator: "KL427",
+            departureCountryCode: "NL",
+            arrivalCountryCode: "AE",
+            departureDay: dayDate,
+            arrivalDay: dayDate
+        )
+        context.insert(trip)
+        journal.trip = trip
+
+        try context.save()
+
+        let allDays = try context.fetch(FetchDescriptor<JournalDay>())
+        let report = YearPresenceReportBuilder.build(year: 2025, journalDays: allDays, calendar: cal)
+
+        #expect(report.loggedDays == 1)
+        #expect(report.unloggedDays == 364)
+        #expect(report.splitTravelDays == 1)
+
+        let june = report.months.first { $0.month == 6 }
+        #expect(june != nil)
+        let row = june?.rows.first { $0.dayKey == dayKey }
+        #expect(row?.isSplitDay == true)
+        #expect(row?.segments.count == 2)
+        #expect(row?.segments[0].countryCode == "NL")
+        #expect(row?.segments[1].countryCode == "AE")
+        #expect(row?.tripSummary?.contains("KL427") == true)
+
+        let pdfData = try YearPresencePDFRenderer.render(report)
+        #expect(pdfData.count > 1000)
+        #expect(String(data: pdfData.prefix(4), encoding: .ascii) == "%PDF")
+    }
+
 }

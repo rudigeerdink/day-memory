@@ -40,6 +40,20 @@ struct BackupSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Reports") {
+                    NavigationLink {
+                        YearPresenceReportView()
+                    } label: {
+                        Label("Year presence report…", systemImage: "doc.richtext")
+                    }
+
+                    Text(
+                        "Generate a PDF day-by-day breakdown for authorities: where you were, working status, leave tags, and logged travel details—including days in two countries."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
                 Section("Journal calendar") {
                     Text(
                         "Journal days are stored by calendar date in this timezone. It stays the same when you travel; change it only if your \"home\" calendar should follow a different region."
@@ -108,7 +122,7 @@ struct BackupSettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Backup")
+            .navigationTitle("Manage")
             .onAppear {
                 JournalCalendar.ensurePreferenceInitialized()
             }
