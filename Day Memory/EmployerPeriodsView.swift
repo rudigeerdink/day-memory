@@ -39,7 +39,7 @@ struct EmployerPeriodsView: View {
                                 Text(period.companyName)
                                     .font(.headline)
                                     .foregroundStyle(.primary)
-                                Text("\(period.employerCountryCode) · \(period.startDate, format: .dateTime.day().month(.abbreviated).year()) – \(period.endDate, format: .dateTime.day().month(.abbreviated).year())")
+                                Text("\(period.employerCountryCode) · \(period.startDate, format: JournalCalendar.dayMonthYearFormat) – \(period.endDate, format: JournalCalendar.dayMonthYearFormat)")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 Text("Annual entitlement: \(period.annualLeaveEntitlementDays) days")

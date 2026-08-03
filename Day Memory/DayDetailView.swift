@@ -44,7 +44,7 @@ struct DayDetailView: View {
     var body: some View {
         Form {
             Section("This day") {
-                Text(day, format: .dateTime.weekday(.wide).day().month(.abbreviated).year())
+                Text(day, format: JournalCalendar.weekdayDayMonthYearFormat)
                 CountryPicker(
                     title: "Country",
                     selection: $country0,

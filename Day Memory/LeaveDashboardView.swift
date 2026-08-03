@@ -128,7 +128,7 @@ struct LeaveDashboardView: View {
             case .throughToday:
                 if let end = report.throughTodayEnd {
                     Text(
-                        "Leave through \(end, format: .dateTime.day().month(.abbreviated).day().year()) in your journal calendar."
+                        "Leave through \(end, format: JournalCalendar.dayMonthYearFormat) in your journal calendar."
                     )
                 } else {
                     Text("No leave days in \(String(year)) on or before today yet.")
@@ -172,7 +172,7 @@ struct LeaveDashboardView: View {
                                 .padding(.vertical, 3)
                                 .background(consumedColor.opacity(0.1), in: Capsule())
                         }
-                        Text("\(card.companyName) · \(card.clippedRangeStart, format: .dateTime.day().month(.abbreviated))–\(card.clippedRangeEnd, format: .dateTime.day().month(.abbreviated).year())")
+                        Text("\(card.companyName) · \(card.clippedRangeStart, format: JournalCalendar.dayMonthFormat)–\(card.clippedRangeEnd, format: JournalCalendar.dayMonthYearFormat)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

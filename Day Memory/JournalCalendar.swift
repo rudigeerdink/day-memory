@@ -37,6 +37,37 @@ enum JournalCalendar {
         return c.date(from: c.dateComponents([.year, .month], from: date)) ?? date
     }
 
+    // MARK: - Display formatting (journal civil timezone, not device)
+
+    /// SwiftUI / FormatStyle defaults to the device timezone. Bind every civil-date label
+    /// to the journal calendar so midnight in Dubai does not render as the previous day in Europe.
+    private static func civilDateStyle(_ base: Date.FormatStyle) -> Date.FormatStyle {
+        var style = base
+        style.calendar = civil
+        style.timeZone = civilTimeZone
+        return style
+    }
+
+    static var monthYearFormat: Date.FormatStyle {
+        civilDateStyle(.dateTime.month(.wide).year())
+    }
+
+    static var monthWideFormat: Date.FormatStyle {
+        civilDateStyle(.dateTime.month(.wide))
+    }
+
+    static var weekdayDayMonthYearFormat: Date.FormatStyle {
+        civilDateStyle(.dateTime.weekday(.wide).day().month(.abbreviated).year())
+    }
+
+    static var dayMonthYearFormat: Date.FormatStyle {
+        civilDateStyle(.dateTime.day().month(.abbreviated).year())
+    }
+
+    static var dayMonthFormat: Date.FormatStyle {
+        civilDateStyle(.dateTime.day().month(.abbreviated))
+    }
+
     static func setCivilTimeZone(identifier: String, modelContext: ModelContext) throws {
         UserDefaults.standard.set(identifier, forKey: timeZonePreferenceKey)
         try reanchorAllJournalDays(modelContext: modelContext)

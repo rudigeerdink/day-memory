@@ -149,7 +149,7 @@ struct YearOverviewView: View {
             case .throughToday:
                 if let end = report.throughTodayEnd {
                     Text(
-                        "Presence days through \(end, format: .dateTime.day().month(.abbreviated).day().year()) in your journal calendar."
+                        "Presence days through \(end, format: JournalCalendar.dayMonthYearFormat) in your journal calendar."
                     )
                 } else {
                     Text("No days in \(String(year)) on or before today yet.")
@@ -200,7 +200,7 @@ struct YearOverviewView: View {
                     .font(.headline)
             }
             Text(
-                "\(slice.companyName) · \(slice.clippedRangeStart, format: .dateTime.day().month(.abbreviated))–\(slice.clippedRangeEnd, format: .dateTime.day().month(.abbreviated).year())"
+                "\(slice.companyName) · \(slice.clippedRangeStart, format: JournalCalendar.dayMonthFormat)–\(slice.clippedRangeEnd, format: JournalCalendar.dayMonthYearFormat)"
             )
             .font(.caption)
             .foregroundStyle(.secondary)

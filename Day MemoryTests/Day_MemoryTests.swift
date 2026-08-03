@@ -10,6 +10,7 @@ import SwiftData
 import Foundation
 @testable import Day_Memory
 
+@Suite(.serialized)
 struct Day_MemoryTests {
 
     @Test func example() async throws {
@@ -177,6 +178,55 @@ struct Day_MemoryTests {
         let pdfData = try YearPresencePDFRenderer.render(report)
         #expect(pdfData.count > 1000)
         #expect(String(data: pdfData.prefix(4), encoding: .ascii) == "%PDF")
+    }
+
+    /// Journal TZ east of the phone (Dubai vs Amsterdam): midnight civil dates must still format as that civil day/month.
+    @Test func civilDateFormatsStayOnJournalDayWhenDeviceIsWest() throws {
+        let tzKey = JournalCalendar.timeZonePreferenceKey
+        let previousTZ = UserDefaults.standard.string(forKey: tzKey)
+        defer {
+            if let previousTZ {
+                UserDefaults.standard.set(previousTZ, forKey: tzKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: tzKey)
+            }
+        }
+        UserDefaults.standard.set("Asia/Dubai", forKey: tzKey)
+
+        var julyComps = DateComponents()
+        julyComps.year = 2026
+        julyComps.month = 7
+        julyComps.day = 15
+        julyComps.hour = 12
+        let julyMid = try #require(JournalCalendar.civil.date(from: julyComps))
+        let julyMonthStart = JournalCalendar.monthStart(for: julyMid)
+
+        #expect(JournalCalendar.civil.component(.month, from: julyMonthStart) == 7)
+        let julyLabel = julyMonthStart.formatted(JournalCalendar.monthYearFormat)
+        let julyName = JournalCalendar.civil.monthSymbols[6]
+        #expect(julyLabel.localizedStandardContains(julyName))
+
+        let amsterdam = try #require(TimeZone(identifier: "Europe/Amsterdam"))
+        var naiveMonthStyle = Date.FormatStyle().month(.wide).year()
+        naiveMonthStyle.timeZone = amsterdam
+        let naiveMonthLabel = julyMonthStart.formatted(naiveMonthStyle)
+        let juneName = JournalCalendar.civil.monthSymbols[5]
+        #expect(naiveMonthLabel.localizedStandardContains(juneName))
+        #expect(julyLabel != naiveMonthLabel)
+
+        let dayKey = "2026-08-24"
+        let midnight = try #require(JournalCalendar.normalizedStartOfDay(dayKey: dayKey))
+        #expect(JournalCalendar.civil.component(.day, from: midnight) == 24)
+
+        let detailLabel = midnight.formatted(JournalCalendar.weekdayDayMonthYearFormat)
+        #expect(detailLabel.contains("24"))
+        #expect(!detailLabel.contains("23"))
+
+        var naiveDetailStyle = Date.FormatStyle().weekday(.wide).day().month(.abbreviated).year()
+        naiveDetailStyle.timeZone = amsterdam
+        let naiveDetailLabel = midnight.formatted(naiveDetailStyle)
+        #expect(naiveDetailLabel.contains("23"))
+        #expect(detailLabel != naiveDetailLabel)
     }
 
 }

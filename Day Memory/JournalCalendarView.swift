@@ -43,16 +43,16 @@ struct JournalCalendarView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                monthCalendarContent
-                    .padding(.horizontal, 16)
-                ScrollView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    monthCalendarContent
+                        .padding(.horizontal, 16)
                     weekActions
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                 }
-                .scrollDisabled(pagerDrag.isHorizontal)
             }
+            .scrollDisabled(pagerDrag.isHorizontal)
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -234,7 +234,7 @@ struct JournalCalendarView: View {
 
             Spacer()
 
-            Text(visibleMonth, format: .dateTime.month(.wide).year())
+            Text(visibleMonth, format: JournalCalendar.monthYearFormat)
                 .font(.title2.weight(.semibold))
                 .id(monthPageID(visibleMonth))
 

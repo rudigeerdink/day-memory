@@ -72,7 +72,7 @@ enum JournalMonthGapNotifier {
         else {
             return "Last month"
         }
-        return prevStart.formatted(.dateTime.month(.wide))
+        return prevStart.formatted(JournalCalendar.monthWideFormat)
     }
 
     /// Next 1st at 09:00 local after `now` (this month’s 1st if still upcoming, otherwise following month’s 1st).
