@@ -118,7 +118,7 @@ struct LeaveDashboardView: View {
         guard countScope == .fullYear, year == calendar.component(.year, from: .now) else { return false }
         return report.employerCards.contains {
             $0.consumedDays > $0.consumedDaysThroughToday
-                || Int($0.proratedAwardedDays.rounded()) > Int($0.proratedAwardedDaysThroughToday.rounded())
+                || $0.proratedAwardedDays > $0.proratedAwardedDaysThroughToday + 0.05
         }
     }
 
@@ -144,9 +144,10 @@ struct LeaveDashboardView: View {
 
     private func employerLeaveCard(_ card: LeaveEmployerCard) -> some View {
         let balance = leaveBalance(for: card)
-        let awardedInt = leaveAwarded(for: card)
+        let awarded = leaveAwarded(for: card)
         let consumed = leaveConsumed(for: card)
         let months = leaveMonths(for: card)
+        let barScale = LeaveMonthBarScale.scale(for: months)
 
         return HStack(alignment: .top, spacing: 0) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
@@ -188,7 +189,7 @@ struct LeaveDashboardView: View {
                                 .tracking(0.6)
                                 .lineLimit(1)
                         },
-                        value: balanceLabel(balance),
+                        value: LeaveDaysFormatting.signedText(balance),
                         valueColor: balanceTint(balance),
                         caption: "days vs pro-rated"
                     )
@@ -205,7 +206,7 @@ struct LeaveDashboardView: View {
                                     .lineLimit(1)
                             }
                         },
-                        value: "\(awardedInt)",
+                        value: LeaveDaysFormatting.text(awarded),
                         valueColor: .primary,
                         caption: "pro-rated"
                     )
@@ -239,7 +240,7 @@ struct LeaveDashboardView: View {
 
                 VStack(spacing: 6) {
                     ForEach(months, id: \.monthStart) { month in
-                        monthBreakdownRow(month: month)
+                        monthBreakdownRow(month: month, barScale: barScale)
                     }
                 }
             }
@@ -248,31 +249,27 @@ struct LeaveDashboardView: View {
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func balanceLabel(_ balance: Int) -> String {
-        if balance > 0 { return "+\(balance)" }
-        return "\(balance)"
+    private func balanceTint(_ balance: Double) -> Color {
+        let tenths = (balance * 10).rounded()
+        if tenths == 0 { return Color.primary }
+        return tenths > 0 ? Color.green : Color.red
     }
 
-    private func balanceTint(_ balance: Int) -> Color {
-        if balance == 0 { return Color.primary }
-        return balance > 0 ? Color.green : Color.red
-    }
-
-    private func leaveBalance(for card: LeaveEmployerCard) -> Int {
+    private func leaveBalance(for card: LeaveEmployerCard) -> Double {
         switch countScope {
         case .throughToday:
-            return Int((card.proratedAwardedDaysThroughToday - Double(card.consumedDaysThroughToday)).rounded())
+            return card.proratedAwardedDaysThroughToday - Double(card.consumedDaysThroughToday)
         case .fullYear:
-            return Int((card.proratedAwardedDays - Double(card.consumedDays)).rounded())
+            return card.proratedAwardedDays - Double(card.consumedDays)
         }
     }
 
-    private func leaveAwarded(for card: LeaveEmployerCard) -> Int {
+    private func leaveAwarded(for card: LeaveEmployerCard) -> Double {
         switch countScope {
         case .throughToday:
-            return Int(card.proratedAwardedDaysThroughToday.rounded())
+            return card.proratedAwardedDaysThroughToday
         case .fullYear:
-            return Int(card.proratedAwardedDays.rounded())
+            return card.proratedAwardedDays
         }
     }
 
@@ -327,14 +324,12 @@ struct LeaveDashboardView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func monthBreakdownRow(month: LeaveMonthBreakdown) -> some View {
+    private func monthBreakdownRow(month: LeaveMonthBreakdown, barScale: Double) -> some View {
         let awarded = month.proratedAwardedDays
         let consumed = month.consumedDays
         let isQuietMonth = awarded < 0.01 && consumed == 0
-        let fillRatio: CGFloat = {
-            guard awarded > 0.001 else { return consumed > 0 ? 1 : 0 }
-            return CGFloat(min(1, Double(consumed) / awarded))
-        }()
+        let awardedRatio = LeaveMonthBarScale.widthRatio(value: awarded, scale: barScale)
+        let consumedRatio = LeaveMonthBarScale.widthRatio(value: Double(consumed), scale: barScale)
 
         return HStack(spacing: 12) {
             Text(monthMonthLabel(month))
@@ -345,17 +340,20 @@ struct LeaveDashboardView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(awardedColor.opacity(0.55))
+                        .fill(Color.primary.opacity(0.06))
                         .frame(height: 6)
                     Capsule()
+                        .fill(awardedColor.opacity(0.55))
+                        .frame(width: barSegmentWidth(ratio: awardedRatio, total: geo.size.width), height: 6)
+                    Capsule()
                         .fill(consumedColor.opacity(0.92))
-                        .frame(width: max(2, geo.size.width * fillRatio), height: 6)
+                        .frame(width: barSegmentWidth(ratio: consumedRatio, total: geo.size.width), height: 6)
                 }
             }
             .frame(height: 6)
 
             HStack(spacing: 3) {
-                Text("\(Int(awarded.rounded()))")
+                Text(LeaveDaysFormatting.text(awarded))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -367,7 +365,7 @@ struct LeaveDashboardView: View {
                     .monospacedDigit()
                     .foregroundStyle(.primary)
             }
-            .frame(width: 56, alignment: .trailing)
+            .frame(width: 72, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -376,6 +374,11 @@ struct LeaveDashboardView: View {
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .opacity(isQuietMonth ? 0.42 : 1)
+    }
+
+    private func barSegmentWidth(ratio: CGFloat, total: CGFloat) -> CGFloat {
+        guard ratio > 0, total > 0 else { return 0 }
+        return min(total, max(2, total * ratio))
     }
 
     /// Month name in the journal calendar (not device timezone — avoids “Dec” for January data).
@@ -414,6 +417,37 @@ struct LeaveYearReport: Hashable, Sendable {
     var year: Int
     var employerCards: [LeaveEmployerCard]
     var throughTodayEnd: Date?
+}
+
+/// Shared month-bar scale: bar length is comparable across rows, not capped at that month's accrual.
+enum LeaveMonthBarScale {
+    static func scale(for months: [LeaveMonthBreakdown]) -> Double {
+        months.reduce(0) { max($0, max($1.proratedAwardedDays, Double($1.consumedDays))) }
+    }
+
+    static func widthRatio(value: Double, scale: Double) -> CGFloat {
+        guard scale > 0.001, value > 0.001 else { return 0 }
+        return CGFloat(min(1, value / scale))
+    }
+}
+
+/// Leave day labels: whole numbers stay integers; otherwise one decimal, half-up.
+enum LeaveDaysFormatting {
+    static func text(_ days: Double) -> String {
+        let tenths = (days * 10).rounded()
+        if tenths.truncatingRemainder(dividingBy: 10) == 0 {
+            return String(Int((tenths / 10).rounded()))
+        }
+        return String(format: "%.1f", tenths / 10)
+    }
+
+    static func signedText(_ days: Double) -> String {
+        let tenths = (days * 10).rounded()
+        if tenths == 0 { return "0" }
+        let body = text(days)
+        if tenths > 0 { return "+\(body)" }
+        return body
+    }
 }
 
 enum LeaveDashboardAggregator {

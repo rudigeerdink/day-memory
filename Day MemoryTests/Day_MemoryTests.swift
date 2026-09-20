@@ -8,6 +8,7 @@
 import Testing
 import SwiftData
 import Foundation
+import PDFKit
 @testable import Day_Memory
 
 @Suite(.serialized)
@@ -104,19 +105,6 @@ struct Day_MemoryTests {
 
     @MainActor
     @Test func yearPresenceReportIncludesSplitDaysAndTravel() throws {
-        let schema = Schema([
-            EmployerPeriod.self,
-            JournalDay.self,
-            PresenceSegment.self,
-            Trip.self,
-            TripTicketImage.self,
-        ])
-        let container = try ModelContainer(
-            for: schema,
-            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
-        )
-        let context = container.mainContext
-
         let tzKey = JournalCalendar.timeZonePreferenceKey
         let previousTZ = UserDefaults.standard.string(forKey: tzKey)
         defer {
@@ -139,13 +127,9 @@ struct Day_MemoryTests {
         let anchor = JournalCalendar.sortAnchor(dayKey: dayKey)!
 
         let journal = JournalDay(day: anchor, dayKey: dayKey, nonWorkingReasonRawValue: nil)
-        context.insert(journal)
-
         let seg1 = PresenceSegment(countryCode: "NL", isWorking: true, sortOrder: 0, journalDay: journal)
         let seg2 = PresenceSegment(countryCode: "AE", isWorking: false, sortOrder: 1, journalDay: journal)
         journal.segments = [seg1, seg2]
-        context.insert(seg1)
-        context.insert(seg2)
 
         let trip = Trip(
             flightDesignator: "KL427",
@@ -154,17 +138,26 @@ struct Day_MemoryTests {
             departureDay: dayDate,
             arrivalDay: dayDate
         )
-        context.insert(trip)
         journal.trip = trip
 
-        try context.save()
+        let leaveDate = cal.date(byAdding: .day, value: 1, to: dayDate)!
+        let leaveKey = JournalCalendar.dayKey(for: leaveDate)
+        let leaveAnchor = JournalCalendar.sortAnchor(dayKey: leaveKey)!
+        let leaveDay = JournalDay(
+            day: leaveAnchor,
+            dayKey: leaveKey,
+            nonWorkingReasonRawValue: DayNonWorkingReason.annualLeave.rawValue
+        )
+        let leaveSeg = PresenceSegment(countryCode: "NL", isWorking: false, sortOrder: 0, journalDay: leaveDay)
+        leaveDay.segments = [leaveSeg]
 
-        let allDays = try context.fetch(FetchDescriptor<JournalDay>())
-        let report = YearPresenceReportBuilder.build(year: 2025, journalDays: allDays, calendar: cal)
+        let report = YearPresenceReportBuilder.build(year: 2025, journalDays: [journal, leaveDay], calendar: cal)
 
-        #expect(report.loggedDays == 1)
-        #expect(report.unloggedDays == 364)
+        #expect(report.loggedDays == 2)
+        #expect(report.unloggedDays == 363)
         #expect(report.splitTravelDays == 1)
+        #expect(report.months.count == 12)
+        #expect(report.loggedDays + report.unloggedDays == 365)
 
         let june = report.months.first { $0.month == 6 }
         #expect(june != nil)
@@ -172,12 +165,48 @@ struct Day_MemoryTests {
         #expect(row?.isSplitDay == true)
         #expect(row?.segments.count == 2)
         #expect(row?.segments[0].countryCode == "NL")
+        #expect(row?.segments[0].workingLabel == "Working")
         #expect(row?.segments[1].countryCode == "AE")
+        #expect(row?.segments[1].workingLabel == "Not working")
         #expect(row?.tripSummary?.contains("KL427") == true)
+        #expect(row?.tripSummary?.contains("NL") == true)
+        #expect(row?.tripSummary?.contains("AE") == true)
+
+        let leaveRow = june?.rows.first { $0.dayKey == leaveKey }
+        #expect(leaveRow?.isLogged == true)
+        #expect(leaveRow?.leaveLabel == "Annual leave")
+        #expect(leaveRow?.workingSummary == "Not working")
+        #expect(leaveRow?.presenceSummary.contains("NL") == true)
+
+        let unloggedRow = june?.rows.first { $0.dayOfMonth == 12 }
+        #expect(unloggedRow?.isLogged == false)
+        #expect(unloggedRow?.presenceSummary == "Not logged")
+        #expect(unloggedRow?.workingSummary == "—")
+        #expect(unloggedRow?.leaveLabel == "—")
 
         let pdfData = try YearPresencePDFRenderer.render(report)
         #expect(pdfData.count > 1000)
         #expect(String(data: pdfData.prefix(4), encoding: .ascii) == "%PDF")
+
+        let document = try #require(PDFDocument(data: pdfData))
+        #expect(document.pageCount > 1)
+        let extracted = (0..<document.pageCount)
+            .compactMap { document.page(at: $0)?.string }
+            .joined(separator: "\n")
+        #expect(extracted.contains("Presence & Working Report — 2025"))
+        #expect(extracted.contains("Date"))
+        #expect(extracted.contains("Location"))
+        #expect(extracted.contains("Working"))
+        #expect(extracted.contains("Leave"))
+        #expect(extracted.contains("Travel"))
+        #expect(extracted.contains("KL427"))
+        #expect(extracted.contains("Annual leave"))
+        #expect(extracted.contains("Not logged"))
+        #expect(extracted.contains("Page 1"))
+        #expect(extracted.contains("June 2025") || extracted.contains("June"))
+
+        let exportURL = try YearPresencePDFRenderer.exportFileURL(year: 2025)
+        #expect(exportURL.lastPathComponent == "DayMemory-presence-2025.pdf")
     }
 
     /// Journal TZ east of the phone (Dubai vs Amsterdam): midnight civil dates must still format as that civil day/month.
@@ -229,4 +258,98 @@ struct Day_MemoryTests {
         #expect(detailLabel != naiveDetailLabel)
     }
 
+}
+
+struct LeaveDaysFormattingTests {
+
+    @Test func wholeNumbersDropDecimal() {
+        #expect(LeaveDaysFormatting.text(0) == "0")
+        #expect(LeaveDaysFormatting.text(11) == "11")
+        #expect(LeaveDaysFormatting.text(11.04) == "11")
+        #expect(LeaveDaysFormatting.text(2) == "2")
+        #expect(LeaveDaysFormatting.text(-3) == "-3")
+    }
+
+    @Test func fractionalDaysKeepOneDecimal() {
+        #expect(LeaveDaysFormatting.text(2.5) == "2.5")
+        #expect(LeaveDaysFormatting.text(15.0 / 31.0 * 2.5) == "1.2")
+        #expect(LeaveDaysFormatting.text(11.209677) == "11.2")
+        #expect(LeaveDaysFormatting.text(-2.5) == "-2.5")
+    }
+
+    @Test func signedBalance() {
+        #expect(LeaveDaysFormatting.signedText(1.2) == "+1.2")
+        #expect(LeaveDaysFormatting.signedText(11) == "+11")
+        #expect(LeaveDaysFormatting.signedText(0) == "0")
+        #expect(LeaveDaysFormatting.signedText(-2.5) == "-2.5")
+        #expect(LeaveDaysFormatting.signedText(-0.04) == "0")
+    }
+}
+
+struct LeaveDashboardAggregatorTests {
+
+    @Test func thirtyDayEntitlementShowsHalfDaysPerMonth() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        func day(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            calendar.date(from: DateComponents(year: year, month: month, day: day))!
+        }
+
+        let period = EmployerPeriod(
+            companyName: "Commercial Bank of Dubai",
+            employerCountryCode: "AE",
+            startDate: day(2026, 8, 17),
+            endDate: day(2026, 12, 31),
+            annualLeaveEntitlementDaysRaw: 30
+        )
+
+        let report = LeaveDashboardAggregator.report(
+            year: 2026,
+            employerPeriods: [period],
+            journalDays: [],
+            calendar: calendar
+        )
+        let card = try #require(report.employerCards.first)
+        let awardedByMonth = Dictionary(
+            uniqueKeysWithValues: card.months.map { ($0.calendarMonth, $0.proratedAwardedDays) }
+        )
+
+        #expect(LeaveDaysFormatting.text(try #require(awardedByMonth[8])) == "1.2")
+        #expect(LeaveDaysFormatting.text(try #require(awardedByMonth[9])) == "2.5")
+        #expect(LeaveDaysFormatting.text(try #require(awardedByMonth[10])) == "2.5")
+        #expect(LeaveDaysFormatting.text(try #require(awardedByMonth[11])) == "2.5")
+        #expect(LeaveDaysFormatting.text(try #require(awardedByMonth[12])) == "2.5")
+        #expect(LeaveDaysFormatting.text(card.proratedAwardedDays) == "11.2")
+    }
+}
+
+struct LeaveMonthBarScaleTests {
+
+    @Test func scaleUsesLargestAwardedOrConsumed() {
+        let months = [
+            LeaveMonthBreakdown(monthStart: Date(), calendarYear: 2026, calendarMonth: 9, proratedAwardedDays: 2.5, consumedDays: 0),
+            LeaveMonthBreakdown(monthStart: Date(), calendarYear: 2026, calendarMonth: 10, proratedAwardedDays: 2.5, consumedDays: 2),
+            LeaveMonthBreakdown(monthStart: Date(), calendarYear: 2026, calendarMonth: 12, proratedAwardedDays: 2.5, consumedDays: 9),
+        ]
+        #expect(LeaveMonthBarScale.scale(for: months) == 9)
+        #expect(abs(Double(LeaveMonthBarScale.widthRatio(value: 2.5, scale: 9)) - 2.5 / 9) < 0.0001)
+        #expect(LeaveMonthBarScale.widthRatio(value: 9, scale: 9) == 1)
+        #expect(LeaveMonthBarScale.widthRatio(value: 0, scale: 9) == 0)
+    }
+
+    @Test func unusedMonthsScaleToAwarded() {
+        let months = [
+            LeaveMonthBreakdown(monthStart: Date(), calendarYear: 2026, calendarMonth: 9, proratedAwardedDays: 2.5, consumedDays: 0),
+            LeaveMonthBreakdown(monthStart: Date(), calendarYear: 2026, calendarMonth: 10, proratedAwardedDays: 1.2, consumedDays: 0),
+        ]
+        #expect(LeaveMonthBarScale.scale(for: months) == 2.5)
+        #expect(abs(Double(LeaveMonthBarScale.widthRatio(value: 1.2, scale: 2.5)) - 1.2 / 2.5) < 0.0001)
+        #expect(LeaveMonthBarScale.widthRatio(value: 2.5, scale: 2.5) == 1)
+    }
+
+    @Test func emptyOrZeroMonthsHaveNoScale() {
+        #expect(LeaveMonthBarScale.scale(for: []) == 0)
+        #expect(LeaveMonthBarScale.widthRatio(value: 2.5, scale: 0) == 0)
+    }
 }
