@@ -49,7 +49,7 @@ enum Countries {
         var counts: [String: Int] = [:]
 
         for day in journalDays {
-            for segment in day.segments {
+            for segment in day.orderedSegments {
                 let code = segment.countryCode.uppercased()
                 guard ModelValidation.isValidCountryCode(code) else { continue }
                 counts[code, default: 0] += 1

@@ -64,7 +64,7 @@ enum DayMemoryBackupService {
                 id: jd.id,
                 day: jd.day,
                 dayKey: jd.dayKey ?? jd.canonicalDayKey,
-                segments: jd.segments.sorted { $0.sortOrder < $1.sortOrder }.map { s in
+                segments: jd.orderedSegments.map { s in
                     DayMemoryBackupSegment(
                         id: s.id,
                         countryCode: s.countryCode,
@@ -81,7 +81,7 @@ enum DayMemoryBackupService {
                         departureDay: trip.departureDay,
                         arrivalDay: trip.arrivalDay,
                         providerSnapshot: trip.providerSnapshot,
-                        ticketImages: trip.ticketImages.sorted { $0.sortOrder < $1.sortOrder }.map { img in
+                        ticketImages: trip.orderedTicketImages.map { img in
                             DayMemoryBackupTicketImage(
                                 id: img.id,
                                 sortOrder: img.sortOrder,
@@ -163,7 +163,7 @@ enum DayMemoryBackupService {
                 for img in t.ticketImages.sorted(by: { $0.sortOrder < $1.sortOrder }) {
                     let data = img.imageDataBase64.flatMap { Data(base64Encoded: $0) }
                     let ti = TripTicketImage(id: img.id, sortOrder: img.sortOrder, imageData: data, trip: trip)
-                    trip.ticketImages.append(ti)
+                    trip.appendTicketImage(ti)
                     modelContext.insert(ti)
                 }
                 jd.trip = trip
@@ -178,7 +178,7 @@ enum DayMemoryBackupService {
                     sortOrder: s.sortOrder,
                     journalDay: jd
                 )
-                jd.segments.append(seg)
+                jd.appendSegment(seg)
                 modelContext.insert(seg)
             }
         }

@@ -141,7 +141,7 @@ enum YearOverviewAggregator {
         func countSegments(in dayList: [Date], working: inout [String: Int], nonWorking: inout [String: Int]) {
             for day in dayList {
                 guard let journal = dayMap[day] else { continue }
-                for seg in journal.segments {
+                for seg in journal.orderedSegments {
                     let code = seg.countryCode
                     if seg.isWorking {
                         working[code, default: 0] += 1

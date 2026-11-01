@@ -15,9 +15,7 @@ struct Day_MemoryApp: App {
         try? JournalCalendar.migrateJournalDayKeys(modelContext: Self.sharedModelContainer.mainContext)
     }
 
-    /// Local SQLite only. CloudKit-backed SwiftData requires optional properties/relationships, no unique
-    /// constraints, and optional inverse relations — our schema is not CloudKit-compatible. iCloud Documents
-    /// backup (JSON) remains available separately.
+    /// Private CloudKit database for this Apple ID. The iCloud Drive JSON backup stays a separate copy.
     private static let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             EmployerPeriod.self,
@@ -26,7 +24,7 @@ struct Day_MemoryApp: App {
             Trip.self,
             TripTicketImage.self,
         ])
-        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
+        let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
         } catch {

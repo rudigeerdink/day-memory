@@ -82,18 +82,18 @@ enum JournalBulkFill {
 
         if let existing {
             let trip = existing.trip
-            for seg in existing.segments {
+            for seg in existing.orderedSegments {
                 context.delete(seg)
             }
-            existing.segments.removeAll()
+            existing.segments = []
             let seg = PresenceSegment(countryCode: country, isWorking: isWorking, sortOrder: 0, journalDay: existing)
-            existing.segments.append(seg)
+            existing.appendSegment(seg)
             existing.trip = trip
             context.insert(seg)
         } else {
             let jd = JournalDay(day: anchor, dayKey: dayKey, segments: [], trip: nil)
             let seg = PresenceSegment(countryCode: country, isWorking: isWorking, sortOrder: 0, journalDay: jd)
-            jd.segments.append(seg)
+            jd.appendSegment(seg)
             context.insert(jd)
             context.insert(seg)
         }

@@ -34,106 +34,161 @@ struct YearOverviewView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        Menu {
-                            Picker("Year", selection: $year) {
-                                ForEach(yearChoices, id: \.self) { y in
-                                    Text(String(y)).tag(y)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "calendar")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(String(year))
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                    .monospacedDigit()
-                                Image(systemName: "chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color(.systemBackground))
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                            }
-                        }
-                        .contentShape(Rectangle())
-
-                        Spacer(minLength: 0)
-                    }
-
-                    Picker("Count scope", selection: $countScope) {
-                        ForEach(YearCountScope.allCases) { scope in
-                            Text(scope.title).tag(scope)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    scopeCaption
-
-                    if showsFutureEntriesHint {
-                        Text("Includes journal entries on future dates in \(String(year)).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if report.yearTotalsByCountry.isEmpty {
-                        ContentUnavailableView(
-                            "No journal entries",
-                            systemImage: "tray",
-                            description: Text("Log days in Journal to see totals for \(String(year)).")
-                        )
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
-                    }
-
-                    if !report.yearTotalsByCountry.isEmpty {
-                        sectionTitle("By presence location")
-                        ForEach(report.yearTotalsByCountry, id: \.self) { row in
-                            locationCard(row)
-                        }
-                    }
-
-                    sectionTitle("By employer country")
-                    if report.employerSlices.isEmpty {
-                        ContentUnavailableView(
-                            "No employer periods",
-                            systemImage: "building.2",
-                            description: Text("Add periods under Employers. Only periods overlapping \(String(year)) are shown.")
-                        )
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                    } else {
-                        ForEach(report.employerSlices) { slice in
-                            employerCard(slice)
-                        }
-                    }
-
-                    let unlogged = unloggedCount(for: countScope)
-                    if unlogged > 0 {
-                        unloggedDaysRow(count: unlogged)
-                    }
+            scroll
+                .navigationTitle("Work view")
+                .background(Color(.systemGroupedBackground))
+                .onAppear {
+                    countScope = YearCountScope.defaultForYear(year, calendar: calendar)
                 }
-                .padding(.horizontal, 16)
+                .onChange(of: year) { _, newYear in
+                    countScope = YearCountScope.defaultForYear(newYear, calendar: calendar)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var scroll: some View {
+        if DayMemoryLayout.isPad {
+            PadDashboardScroll { columns in
+                dashboard(columns: columns, capControls: true)
+            }
+        } else {
+            ScrollView {
+                dashboard(columns: 1, capControls: false)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+            }
+        }
+    }
+
+    private func dashboard(columns: Int, capControls: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                yearMenu
+                Spacer(minLength: 0)
+            }
+
+            if capControls {
+                scopePicker
+                    .frame(maxWidth: 480, alignment: .leading)
+            } else {
+                scopePicker
+            }
+
+            scopeCaption
+
+            if showsFutureEntriesHint {
+                Text("Includes journal entries on future dates in \(String(year)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if report.yearTotalsByCountry.isEmpty {
+                ContentUnavailableView(
+                    "No journal entries",
+                    systemImage: "tray",
+                    description: Text("Log days in Journal to see totals for \(String(year)).")
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            }
+
+            if !report.yearTotalsByCountry.isEmpty {
+                sectionTitle("By presence location")
+                locationCards(columns: columns)
+            }
+
+            sectionTitle("By employer country")
+            if report.employerSlices.isEmpty {
+                ContentUnavailableView(
+                    "No employer periods",
+                    systemImage: "building.2",
+                    description: Text("Add periods under Employers. Only periods overlapping \(String(year)) are shown.")
+                )
+                .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
+            } else {
+                employerCards(columns: columns)
             }
-            .navigationTitle("Work view")
-            .background(Color(.systemGroupedBackground))
-            .onAppear {
-                countScope = YearCountScope.defaultForYear(year, calendar: calendar)
+
+            let unlogged = unloggedCount(for: countScope)
+            if unlogged > 0 {
+                unloggedDaysRow(count: unlogged)
             }
-            .onChange(of: year) { _, newYear in
-                countScope = YearCountScope.defaultForYear(newYear, calendar: calendar)
+        }
+    }
+
+    private var yearMenu: some View {
+        Menu {
+            Picker("Year", selection: $year) {
+                ForEach(yearChoices, id: \.self) { y in
+                    Text(String(y)).tag(y)
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(String(year))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var scopePicker: some View {
+        Picker("Count scope", selection: $countScope) {
+            ForEach(YearCountScope.allCases) { scope in
+                Text(scope.title).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder
+    private func locationCards(columns: Int) -> some View {
+        if columns > 1 {
+            PadCardStack(columns: columns) {
+                ForEach(report.yearTotalsByCountry, id: \.self) { row in
+                    locationCard(row)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        } else {
+            ForEach(report.yearTotalsByCountry, id: \.self) { row in
+                locationCard(row)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func employerCards(columns: Int) -> some View {
+        if columns > 1 {
+            PadCardStack(columns: columns) {
+                ForEach(report.employerSlices) { slice in
+                    employerCard(slice)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        } else {
+            ForEach(report.employerSlices) { slice in
+                employerCard(slice)
             }
         }
     }

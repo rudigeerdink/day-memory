@@ -94,6 +94,14 @@ struct BackupSettingsView: View {
                     }
                 }
 
+                Section("iCloud sync") {
+                    Text(
+                        "Employers, journal days, and ticket photos sync through your private iCloud database. iPhone and iPad stay aligned when both are signed into the same Apple ID. The file below is a separate backup."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
                 Section("iCloud Drive") {
                     Toggle("Automatic backup (about once per day)", isOn: $autoICloudBackup)
 
@@ -122,6 +130,7 @@ struct BackupSettingsView: View {
                     }
                 }
             }
+            .padReadableColumn()
             .navigationTitle("Manage")
             .onAppear {
                 JournalCalendar.ensurePreferenceInitialized()

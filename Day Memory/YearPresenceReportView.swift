@@ -68,6 +68,7 @@ struct YearPresenceReportView: View {
                 )
             }
         }
+        .padReadableColumn()
         .navigationTitle("Year report")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(

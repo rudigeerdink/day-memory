@@ -8,10 +8,11 @@ import SwiftUI
 
 struct EmployerPeriodsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query(sort: \EmployerPeriod.startDate) private var periods: [EmployerPeriod]
 
     /// Sheet content must not depend on a separate flag + optional model (race → empty sheet).
-    private struct EditingEmployerPeriod: Identifiable {
+    struct EditingEmployerPeriod: Identifiable {
         var id: UUID { period.id }
         let period: EmployerPeriod
     }
@@ -21,42 +22,33 @@ struct EmployerPeriodsView: View {
     @State private var deleteError: String?
     @State private var showDeleteError = false
 
+    private var usesRegularPadLayout: Bool {
+        DayMemoryLayout.isRegularPad(horizontalSizeClass)
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                if periods.isEmpty {
-                    ContentUnavailableView(
-                        "No employers yet",
-                        systemImage: "building.2",
-                        description: Text("Add the company that paid you and its country for a date range. Periods cannot overlap.")
-                    )
-                } else {
-                    ForEach(periods, id: \.id) { period in
-                        Button {
-                            editing = EditingEmployerPeriod(period: period)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(period.companyName)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text("\(period.employerCountryCode) · \(period.startDate, format: JournalCalendar.dayMonthYearFormat) – \(period.endDate, format: JournalCalendar.dayMonthYearFormat)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Text("Annual entitlement: \(period.annualLeaveEntitlementDays) days")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .onDelete(perform: delete)
-                }
-            }
+            editorContainer
+        }
+    }
+
+    private var editorContainer: some View {
+        employerChrome
+            .modifier(EmployerEditorChrome(
+                usesInspector: usesRegularPadLayout,
+                showAdd: $showAdd,
+                editing: $editing,
+                modelContext: modelContext
+            ))
+    }
+
+    private var employerChrome: some View {
+        employerList
             .navigationTitle("Employers")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        editing = nil
                         showAdd = true
                     } label: {
                         Image(systemName: "plus")
@@ -64,27 +56,61 @@ struct EmployerPeriodsView: View {
                     .accessibilityLabel("Add employer period")
                 }
             }
-            .sheet(isPresented: $showAdd) {
-                NavigationStack {
-                    EmployerPeriodForm(period: nil)
-                }
-                .environment(\.modelContext, modelContext)
-            }
-            .sheet(item: $editing) { selection in
-                NavigationStack {
-                    EmployerPeriodForm(period: selection.period)
-                }
-                .environment(\.modelContext, modelContext)
-            }
             .alert("Could not delete", isPresented: $showDeleteError) {
                 Button("OK", role: .cancel) { deleteError = nil }
             } message: {
                 Text(deleteError ?? "")
             }
+    }
+
+    private var employerList: some View {
+        List {
+            if periods.isEmpty {
+                ContentUnavailableView(
+                    "No employers yet",
+                    systemImage: "building.2",
+                    description: Text("Add the company that paid you and its country for a date range. Periods cannot overlap.")
+                )
+            } else {
+                ForEach(periods, id: \.id) { period in
+                    if usesRegularPadLayout && editing?.period.id == period.id {
+                        employerRow(period)
+                            .listRowBackground(Color.accentColor.opacity(0.12))
+                    } else {
+                        employerRow(period)
+                    }
+                }
+                .onDelete(perform: delete)
+            }
         }
     }
 
+    private func employerRow(_ period: EmployerPeriod) -> some View {
+        Button {
+            showAdd = false
+            editing = EditingEmployerPeriod(period: period)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(period.companyName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("\(period.employerCountryCode) · \(period.startDate, format: JournalCalendar.dayMonthYearFormat) – \(period.endDate, format: JournalCalendar.dayMonthYearFormat)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Annual entitlement: \(period.annualLeaveEntitlementDays) days")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func delete(at offsets: IndexSet) {
+        let removedIDs = Set(offsets.map { periods[$0].id })
+        if let editing, removedIDs.contains(editing.period.id) {
+            self.editing = nil
+        }
         for index in offsets {
             let p = periods[index]
             modelContext.delete(p)
@@ -95,6 +121,59 @@ struct EmployerPeriodsView: View {
             deleteError = error.localizedDescription
             showDeleteError = true
         }
+    }
+}
+
+private struct EmployerEditorChrome: ViewModifier {
+    var usesInspector: Bool
+    @Binding var showAdd: Bool
+    @Binding var editing: EmployerPeriodsView.EditingEmployerPeriod?
+    var modelContext: ModelContext
+
+    func body(content: Content) -> some View {
+        if usesInspector {
+            content
+                .inspector(isPresented: presented) {
+                    NavigationStack {
+                        if showAdd {
+                            EmployerPeriodForm(period: nil)
+                        } else if let editing {
+                            EmployerPeriodForm(period: editing.period)
+                                .id(editing.id)
+                        }
+                    }
+                    .environment(\.modelContext, modelContext)
+                }
+                .inspectorColumnWidth(min: 380, ideal: 460, max: 560)
+        } else {
+            content
+                .sheet(isPresented: $showAdd) {
+                    NavigationStack {
+                        EmployerPeriodForm(period: nil)
+                    }
+                    .environment(\.modelContext, modelContext)
+                    .padFormSheet()
+                }
+                .sheet(item: $editing) { selection in
+                    NavigationStack {
+                        EmployerPeriodForm(period: selection.period)
+                    }
+                    .environment(\.modelContext, modelContext)
+                    .padFormSheet()
+                }
+        }
+    }
+
+    private var presented: Binding<Bool> {
+        Binding(
+            get: { showAdd || editing != nil },
+            set: { isShown in
+                if !isShown {
+                    showAdd = false
+                    editing = nil
+                }
+            }
+        )
     }
 }
 

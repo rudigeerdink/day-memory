@@ -16,6 +16,8 @@ struct DayDetailView: View {
 
     let day: Date
     let defaultFallbackCountry: String
+    /// Called when the editor closes after save, delete, or Close. iPhone relies on `dismiss()` alone.
+    var onFinished: (() -> Void)? = nil
 
     @State private var didLoad = false
 
@@ -144,7 +146,7 @@ struct DayDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Close") { dismiss() }
+                Button("Close") { closeEditor() }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
@@ -162,6 +164,11 @@ struct DayDetailView: View {
         } message: {
             Text(saveError ?? "")
         }
+    }
+
+    private func closeEditor() {
+        onFinished?()
+        dismiss()
     }
 
     private func frequentCountryCodes(including code: String) -> [String] {
@@ -184,7 +191,7 @@ struct DayDetailView: View {
         if let existing = try? modelContext.fetch(fd).first {
             hasExistingEntry = true
             nonWorkingReason = existing.nonWorkingReason
-            let sorted = existing.segments.sorted { $0.sortOrder < $1.sortOrder }
+            let sorted = existing.orderedSegments
             if let s0 = sorted.first {
                 country0 = s0.countryCode
                 working0 = s0.isWorking
@@ -198,7 +205,7 @@ struct DayDetailView: View {
                 flight = t.flightDesignator ?? ""
                 depCountry = t.departureCountryCode ?? ""
                 arrCountry = t.arrivalCountryCode ?? ""
-                ticketImages = t.ticketImages.sorted { $0.sortOrder < $1.sortOrder }.compactMap(\.imageData)
+                ticketImages = t.orderedTicketImages.compactMap(\.imageData)
             }
         } else {
             hasExistingEntry = false
@@ -282,10 +289,10 @@ struct DayDetailView: View {
             journal.day = anchor
             journal.dayKey = dayKey
             let tripKeep = existing.trip
-            for seg in journal.segments {
+            for seg in journal.orderedSegments {
                 modelContext.delete(seg)
             }
-            journal.segments.removeAll()
+            journal.segments = []
             journal.trip = tripKeep
         } else {
             journal = JournalDay(
@@ -303,7 +310,7 @@ struct DayDetailView: View {
                 sortOrder: s.sortOrder,
                 journalDay: journal
             )
-            journal.segments.append(seg)
+            journal.appendSegment(seg)
             modelContext.insert(seg)
         }
 
@@ -328,14 +335,14 @@ struct DayDetailView: View {
             trip.departureDay = normalized
             trip.arrivalDay = normalized
 
-            let oldImages = Array(trip.ticketImages)
+            let oldImages = trip.orderedTicketImages
             for img in oldImages {
                 modelContext.delete(img)
             }
-            trip.ticketImages.removeAll()
+            trip.ticketImages = []
             for (i, d) in ticketImages.enumerated() {
                 let ti = TripTicketImage(sortOrder: i, imageData: d, trip: trip)
-                trip.ticketImages.append(ti)
+                trip.appendTicketImage(ti)
                 modelContext.insert(ti)
             }
         } else if let t = journal.trip {
@@ -345,7 +352,7 @@ struct DayDetailView: View {
 
         do {
             try modelContext.save()
-            dismiss()
+            closeEditor()
         } catch {
             errorTitle = "Cannot save"
             saveError = error.localizedDescription
@@ -361,20 +368,20 @@ struct DayDetailView: View {
 
         do {
             guard let existing = try modelContext.fetch(fd).first else {
-                dismiss()
+                closeEditor()
                 return
             }
 
             if let trip = existing.trip {
                 existing.trip = nil
-                if trip.journalDays.count <= 1 {
+                if trip.linkedJournalDays.count <= 1 {
                     modelContext.delete(trip)
                 }
             }
 
             modelContext.delete(existing)
             try modelContext.save()
-            dismiss()
+            closeEditor()
         } catch {
             errorTitle = "Cannot delete day"
             saveError = error.localizedDescription

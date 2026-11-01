@@ -34,6 +34,7 @@ struct CountryPicker: View {
                 )
             }
             .presentationDetents([.medium, .large])
+            .padFormSheet()
         }
     }
 

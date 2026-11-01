@@ -128,8 +128,7 @@ enum YearPresenceReportBuilder {
 
             if let journal = dayMap[day] {
                 logged += 1
-                let segments = journal.segments
-                    .sorted { $0.sortOrder < $1.sortOrder }
+                let segments = journal.orderedSegments
                     .map { seg in
                         YearPresenceSegmentRow(
                             countryCode: seg.countryCode.uppercased(),
@@ -235,7 +234,7 @@ enum YearPresenceReportBuilder {
             parts.append("To \(CountryDisplay.name(for: arrCode)) (\(arrCode))")
         }
 
-        let ticketCount = trip.ticketImages.count
+        let ticketCount = trip.orderedTicketImages.count
         if ticketCount > 0 {
             parts.append("\(ticketCount) ticket photo\(ticketCount == 1 ? "" : "s")")
         }

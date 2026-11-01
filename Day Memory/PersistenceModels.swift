@@ -8,11 +8,11 @@ import SwiftData
 
 @Model
 final class EmployerPeriod {
-    var id: UUID
-    var companyName: String
-    var employerCountryCode: String
-    var startDate: Date
-    var endDate: Date
+    var id: UUID = UUID()
+    var companyName: String = ""
+    var employerCountryCode: String = ""
+    var startDate: Date = Date()
+    var endDate: Date = Date()
     var annualLeaveEntitlementDaysRaw: Int?
 
     init(
@@ -34,13 +34,14 @@ final class EmployerPeriod {
 
 @Model
 final class JournalDay {
-    var id: UUID
+    var id: UUID = UUID()
     /// Sort anchor: noon on this civil day in the journal timezone (see `JournalCalendar`).
-    var day: Date
+    var day: Date = Date()
     /// ISO `yyyy-MM-dd` civil date — canonical identity, independent of device travel.
-    @Attribute(.unique) var dayKey: String?
+    /// Uniqueness is enforced in app code. CloudKit cannot honor `@Attribute(.unique)`.
+    var dayKey: String?
     @Relationship(deleteRule: .cascade, inverse: \PresenceSegment.journalDay)
-    var segments: [PresenceSegment]
+    var segments: [PresenceSegment]? = []
     var trip: Trip?
     var nonWorkingReasonRawValue: String?
 
@@ -63,10 +64,10 @@ final class JournalDay {
 
 @Model
 final class PresenceSegment {
-    var id: UUID
-    var countryCode: String
-    var isWorking: Bool
-    var sortOrder: Int
+    var id: UUID = UUID()
+    var countryCode: String = ""
+    var isWorking: Bool = false
+    var sortOrder: Int = 0
     var journalDay: JournalDay?
 
     init(id: UUID = UUID(), countryCode: String, isWorking: Bool, sortOrder: Int, journalDay: JournalDay? = nil) {
@@ -80,7 +81,7 @@ final class PresenceSegment {
 
 @Model
 final class Trip {
-    var id: UUID
+    var id: UUID = UUID()
     var flightDesignator: String?
     var departureCountryCode: String?
     var arrivalCountryCode: String?
@@ -88,9 +89,9 @@ final class Trip {
     var arrivalDay: Date?
     var providerSnapshot: String?
     @Relationship(deleteRule: .cascade, inverse: \TripTicketImage.trip)
-    var ticketImages: [TripTicketImage]
+    var ticketImages: [TripTicketImage]? = []
     @Relationship(inverse: \JournalDay.trip)
-    var journalDays: [JournalDay]
+    var journalDays: [JournalDay]? = []
 
     init(
         id: UUID = UUID(),
@@ -117,8 +118,8 @@ final class Trip {
 
 @Model
 final class TripTicketImage {
-    var id: UUID
-    var sortOrder: Int
+    var id: UUID = UUID()
+    var sortOrder: Int = 0
     @Attribute(.externalStorage) var imageData: Data?
     var trip: Trip?
 
@@ -131,6 +132,16 @@ final class TripTicketImage {
 }
 
 extension JournalDay {
+    var orderedSegments: [PresenceSegment] {
+        (segments ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    func appendSegment(_ segment: PresenceSegment) {
+        var current = segments ?? []
+        current.append(segment)
+        segments = current
+    }
+
     /// Stable identity for UI matching; prefers persisted `dayKey`.
     var canonicalDayKey: String {
         if let k = dayKey, !k.isEmpty {
@@ -151,11 +162,27 @@ extension JournalDay {
             id: id,
             day: day,
             dayKey: canonicalDayKey,
-            segments: segments.sorted { $0.sortOrder < $1.sortOrder }.map {
+            segments: orderedSegments.map {
                 DayPresenceSegmentSnapshot(id: $0.id, countryCode: $0.countryCode, isWorking: $0.isWorking, sortOrder: $0.sortOrder)
             },
             linkedTripId: trip?.id
         )
+    }
+}
+
+extension Trip {
+    var orderedTicketImages: [TripTicketImage] {
+        (ticketImages ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var linkedJournalDays: [JournalDay] {
+        journalDays ?? []
+    }
+
+    func appendTicketImage(_ image: TripTicketImage) {
+        var current = ticketImages ?? []
+        current.append(image)
+        ticketImages = current
     }
 }
 

@@ -8,12 +8,15 @@ import SwiftUI
 
 struct JournalCalendarView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Query(sort: \JournalDay.day) private var journalDays: [JournalDay]
     @Query(sort: \EmployerPeriod.startDate) private var employerPeriods: [EmployerPeriod]
 
     @State private var visibleMonth: Date = JournalCalendar.monthStart(for: .now)
     @State private var monthDragOffset: CGFloat = 0
-    @State private var monthPageWidth: CGFloat = 0
+    @State private var monthPageWidth: CGFloat = DayMemoryLayout.isPad ? DayMemoryLayout.screenWidth : 0
+    @State private var didMeasureMonthPage = false
+    @State private var showDayInspector = false
     @GestureState private var pagerDrag = PagerDrag()
     /// Persists after the day sheet closes so week apply still knows which week to use (`sheet(item:)` clears `selection` on dismiss).
     @State private var focusedDay: Date?
@@ -41,49 +44,49 @@ struct JournalCalendarView: View {
 
     private var calendar: Calendar { JournalCalendar.civil }
 
+    private var usesRegularPadLayout: Bool {
+        DayMemoryLayout.isRegularPad(horizontalSizeClass)
+    }
+
+    private var monthGridSpacing: CGFloat { usesRegularPadLayout ? 8 : 6 }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    monthCalendarContent
-                        .padding(.horizontal, 16)
-                    weekActions
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
-                }
-            }
-            .scrollDisabled(pagerDrag.isHorizontal)
-            .navigationTitle("Journal")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showFallbackCountryPicker = true
-                    } label: {
-                        Image(systemName: "globe")
+            journalPage
+                .navigationTitle("Journal")
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showFallbackCountryPicker = true
+                        } label: {
+                            Image(systemName: "globe")
+                        }
+                        .accessibilityLabel("Fallback country for new weeks")
                     }
-                    .accessibilityLabel("Fallback country for new weeks")
                 }
-            }
-            .sheet(isPresented: $showFallbackCountryPicker) {
-                NavigationStack {
-                    CountryPickerSheet(
-                        selection: $fallbackCountry,
-                        frequentCodes: Countries.frequentCodes(
-                            journalDays: journalDays,
-                            employerPeriods: employerPeriods,
-                            including: fallbackCountry
+                .sheet(isPresented: $showFallbackCountryPicker) {
+                    NavigationStack {
+                        CountryPickerSheet(
+                            selection: $fallbackCountry,
+                            frequentCodes: Countries.frequentCodes(
+                                journalDays: journalDays,
+                                employerPeriods: employerPeriods,
+                                including: fallbackCountry
+                            )
                         )
-                    )
+                    }
+                    .presentationDetents([.medium, .large])
+                    .padFormSheet()
                 }
-                .presentationDetents([.medium, .large])
-            }
-            .sheet(item: $selection) { sel in
-                NavigationStack {
-                    DayDetailView(day: sel.day, defaultFallbackCountry: fallbackCountry)
-                }
-            }
-            .alert("Apply week defaults?", isPresented: $showApplyWeekConfirm) {
+                .modifier(DayEditorPresentation(
+                    usesInspector: usesRegularPadLayout,
+                    selection: $selection,
+                    showInspector: $showDayInspector,
+                    focusedDay: focusedDay,
+                    fallbackCountry: fallbackCountry
+                ))
+                .alert("Apply week defaults?", isPresented: $showApplyWeekConfirm) {
                 Button("Cancel", role: .cancel) {}
                 Button("Apply") { applyWeekDefaults() }
             } message: {
@@ -96,6 +99,57 @@ struct JournalCalendarView: View {
             } message: {
                 Text(applyError ?? "")
             }
+            .onChange(of: horizontalSizeClass) { _, _ in
+                guard DayMemoryLayout.isPad else { return }
+                if usesRegularPadLayout {
+                    if let day = selection?.day {
+                        focusedDay = day
+                        selection = nil
+                        showDayInspector = true
+                    }
+                } else if showDayInspector, let focusedDay {
+                    showDayInspector = false
+                    selection = JournalDaySelection(day: focusedDay)
+                }
+            }
+        }
+    }
+
+    private var journalPage: some View {
+        ScrollView {
+            fittedJournalColumn
+        }
+        .scrollDisabled(pagerDrag.isHorizontal)
+    }
+
+    @ViewBuilder
+    private var fittedJournalColumn: some View {
+        if usesRegularPadLayout {
+            journalColumn
+                .frame(maxWidth: 920)
+                .frame(maxWidth: .infinity)
+        } else {
+            journalColumn
+        }
+    }
+
+    private var journalColumn: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            monthCalendarContent
+                .padding(.horizontal, 16)
+            weekActionsBlock
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+        }
+    }
+
+    @ViewBuilder
+    private var weekActionsBlock: some View {
+        if usesRegularPadLayout {
+            weekActions
+                .frame(maxWidth: 480, alignment: .leading)
+        } else {
+            weekActions
         }
     }
 
@@ -129,17 +183,19 @@ struct JournalCalendarView: View {
             .highPriorityGesture(monthPagerDragGesture(pageWidth: pageWidth))
             .onAppear {
                 monthPageWidth = pageWidth
+                didMeasureMonthPage = true
             }
             .onChange(of: pageWidth) { _, newWidth in
                 monthPageWidth = newWidth
+                didMeasureMonthPage = true
             }
         }
-        .frame(height: monthPagerHeight(for: visibleMonth))
+        .frame(height: monthPagerHeight(for: visibleMonth, pageWidth: monthPageWidth))
     }
 
     private func monthPage(month: Date, pageWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            monthGrid(for: month)
+            monthGrid(for: month, cellHeight: dayCellHeight(pageWidth: pageWidth))
             monthColorLegend(for: month)
         }
         .frame(width: pageWidth, alignment: .leading)
@@ -213,13 +269,37 @@ struct JournalCalendarView: View {
         return calendar.date(byAdding: .month, value: delta, to: start) ?? start
     }
 
-    private func monthPagerHeight(for month: Date) -> CGFloat {
+    private func dayCellHeight(pageWidth: CGFloat) -> CGFloat {
+        guard usesRegularPadLayout, pageWidth > 0 else { return 56 }
+        let columnWidth = (pageWidth - monthGridSpacing * 6) / 7
+        return min(120, max(72, floor(columnWidth * 0.92)))
+    }
+
+    private func monthPagerHeight(for month: Date, pageWidth: CGFloat) -> CGFloat {
         let rowCount = max(1, daysForMonthGrid(month: month).count / 7)
-        let gridHeight = CGFloat(rowCount) * 62
+        let gridHeight: CGFloat
+        if usesRegularPadLayout {
+            let cell = dayCellHeight(pageWidth: pageWidth)
+            gridHeight = CGFloat(rowCount) * cell + CGFloat(max(0, rowCount - 1)) * monthGridSpacing + 4
+        } else {
+            gridHeight = CGFloat(rowCount) * 62
+        }
         let legendItems = monthLegendItems(from: visibleCountryCodesInMonth(month: month))
-        let legendHeight = legendItems.isEmpty ? 0 : CGFloat(max(1, legendItems.count / 2)) * 28
+        let legendHeight = legendBlockHeight(itemCount: legendItems.count, pageWidth: pageWidth)
         let legendSpacing = legendItems.isEmpty ? 0 : CGFloat(20)
         return gridHeight + legendSpacing + legendHeight
+    }
+
+    private func legendBlockHeight(itemCount: Int, pageWidth: CGFloat) -> CGFloat {
+        guard itemCount > 0 else { return 0 }
+        let rows: Int
+        if usesRegularPadLayout, didMeasureMonthPage, pageWidth > 0 {
+            let columns = max(1, Int((pageWidth + 12) / 152))
+            rows = Int(ceil(Double(itemCount) / Double(columns)))
+        } else {
+            rows = max(1, itemCount / 2)
+        }
+        return CGFloat(rows) * 28
     }
 
     private var monthHeader: some View {
@@ -258,7 +338,7 @@ struct JournalCalendarView: View {
         return HStack(spacing: 6) {
             ForEach(Array(ordered.enumerated()), id: \.offset) { _, sym in
                 Text(sym.uppercased())
-                    .font(.caption2.weight(.medium))
+                    .font((usesRegularPadLayout ? Font.caption : Font.caption2).weight(.medium))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
             }
@@ -272,16 +352,16 @@ struct JournalCalendarView: View {
         }
     }
 
-    private func monthGrid(for month: Date) -> some View {
+    private func monthGrid(for month: Date, cellHeight: CGFloat) -> some View {
         let slots = monthGridSlots(for: month)
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
-        return LazyVGrid(columns: columns, spacing: 6) {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: monthGridSpacing), count: 7)
+        return LazyVGrid(columns: columns, spacing: monthGridSpacing) {
             ForEach(slots) { slot in
                 if let day = slot.day {
-                    dayCell(day)
+                    dayCell(day, height: cellHeight)
                 } else {
                     Color.clear
-                        .frame(height: 56)
+                        .frame(height: cellHeight)
                 }
             }
         }
@@ -310,7 +390,7 @@ struct JournalCalendarView: View {
         }
     }
 
-    private func dayCell(_ day: Date) -> some View {
+    private func dayCell(_ day: Date, height: CGFloat) -> some View {
         let dayKey = JournalCalendar.dayKey(for: day)
         let normalized = JournalCalendar.normalizedStartOfDay(dayKey: dayKey)
             ?? ModelValidation.startOfDay(day, calendar: calendar)
@@ -329,6 +409,7 @@ struct JournalCalendarView: View {
         let isPastDay = normalized < todayStart
         let isUnfilled = journalIsUnfilled(record)
         let showPastUnfilled = isPastDay && isUnfilled
+        let prominent = height >= 84
 
         return ZStack {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -339,11 +420,11 @@ struct JournalCalendarView: View {
             }
             VStack(spacing: 4) {
                 Text("\(calendar.component(.day, from: day))")
-                    .font(.body.weight(isToday ? .bold : .regular))
+                    .font((prominent ? Font.title3 : Font.body).weight(isToday ? .bold : .regular))
                 if let record, let countryLine = gridCountryLabel(for: record) {
                     VStack(spacing: 4) {
                         Text(countryLine)
-                            .font(.caption2.weight(accentCountryLine ? .semibold : .medium))
+                            .font((prominent ? Font.caption : Font.caption2).weight(accentCountryLine ? .semibold : .medium))
                             .foregroundStyle(accentCountryLine ? Color.primary : Color.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
@@ -352,7 +433,7 @@ struct JournalCalendarView: View {
                             ForEach(gridSegments(for: record), id: \.id) { segment in
                                 Circle()
                                     .fill(CountryColors.dotColor(countryCode: segment.countryCode, isWorking: segment.isWorking))
-                                    .frame(width: 6, height: 6)
+                                    .frame(width: prominent ? 8 : 6, height: prominent ? 8 : 6)
                             }
                         }
                     }
@@ -399,20 +480,30 @@ struct JournalCalendarView: View {
                     .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
             }
         }
+        .overlay {
+            if isSelected && usesRegularPadLayout {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
             focusedDay = normalized
-            selection = JournalDaySelection(day: normalized)
+            if usesRegularPadLayout {
+                showDayInspector = true
+            } else {
+                selection = JournalDaySelection(day: normalized)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Day \(calendar.component(.day, from: day))")
-        .frame(height: 56)
+        .frame(height: height)
     }
 
     private func journalIsUnfilled(_ record: JournalDay?) -> Bool {
         guard let record else { return true }
-        return record.segments.isEmpty
+        return record.orderedSegments.isEmpty
     }
 
     /// Employer country active on `normalizedDay`, from non-overlapping periods.
@@ -435,7 +526,7 @@ struct JournalCalendarView: View {
     private func showsWorkAwayFromEmployer(normalizedDay: Date, record: JournalDay?) -> Bool {
         guard let record else { return false }
         guard let employer = employerCountryCode(forNormalizedDay: normalizedDay) else { return false }
-        for segment in record.segments where segment.isWorking {
+        for segment in record.orderedSegments where segment.isWorking {
             if segment.countryCode.uppercased() != employer {
                 return true
             }
@@ -445,7 +536,7 @@ struct JournalCalendarView: View {
 
     /// Single code, or `NL/AE` when two segments (ordered by `sortOrder`).
     private func gridCountryLabel(for record: JournalDay) -> String? {
-        let sorted = record.segments.sorted { $0.sortOrder < $1.sortOrder }
+        let sorted = record.orderedSegments
         guard let first = sorted.first else { return nil }
         if sorted.count >= 2 {
             let second = sorted[1]
@@ -456,7 +547,7 @@ struct JournalCalendarView: View {
 
     /// Presence segments shown as dot markers under the country label.
     private func gridSegments(for record: JournalDay) -> [PresenceSegment] {
-        record.segments.sorted { $0.sortOrder < $1.sortOrder }
+        record.orderedSegments
     }
 
     /// Vertical indicator style on country-change days:
@@ -464,7 +555,7 @@ struct JournalCalendarView: View {
     /// - Split day: gradient from departure segment to arrival segment.
     private func transitionIndicatorStyle(forNormalizedDay _: Date, record: JournalDay?) -> AnyShapeStyle {
         guard let record else { return AnyShapeStyle(Color.primary.opacity(0.22)) }
-        let sorted = record.segments.sorted { $0.sortOrder < $1.sortOrder }
+        let sorted = record.orderedSegments
         guard let first = sorted.first else { return AnyShapeStyle(Color.primary.opacity(0.22)) }
 
         if sorted.count >= 2 {
@@ -499,7 +590,7 @@ struct JournalCalendarView: View {
     private func primaryCountryCode(forNormalizedDay normalized: Date) -> String? {
         let dk = JournalCalendar.dayKey(for: normalized)
         guard let jd = journalDays.first(where: { $0.canonicalDayKey == dk }),
-              let first = jd.segments.sorted(by: { $0.sortOrder < $1.sortOrder }).first
+              let first = jd.orderedSegments.first
         else { return nil }
         return first.countryCode
     }
@@ -520,7 +611,7 @@ struct JournalCalendarView: View {
     /// a split day when today is only the “landing” continuation (matches yesterday’s **second** segment).
     private func emphasizeCountryLine(forNormalizedDay normalized: Date, record: JournalDay?) -> Bool {
         guard let record else { return false }
-        let sorted = record.segments.sorted { $0.sortOrder < $1.sortOrder }
+        let sorted = record.orderedSegments
         if sorted.count >= 2 {
             return true
         }
@@ -538,7 +629,7 @@ struct JournalCalendarView: View {
         guard let yRecord = journalDays.first(where: { $0.canonicalDayKey == yKey }) else {
             return false
         }
-        let ySorted = yRecord.segments.sorted { $0.sortOrder < $1.sortOrder }
+        let ySorted = yRecord.orderedSegments
         guard ySorted.count >= 2 else { return false }
         guard let todayPrimary = primaryCountryCode(forNormalizedDay: normalizedDay) else { return false }
         return ySorted[1].countryCode == todayPrimary
@@ -590,7 +681,7 @@ struct JournalCalendarView: View {
             guard let record = journalDays.first(where: { $0.canonicalDayKey == dk }) else {
                 return
             }
-            for segment in record.segments {
+            for segment in record.orderedSegments {
                 acc.insert(segment.countryCode.uppercased())
             }
         }
@@ -647,6 +738,40 @@ struct JournalCalendarView: View {
 struct JournalDaySelection: Identifiable {
     var day: Date
     var id: TimeInterval { day.timeIntervalSinceReferenceDate }
+}
+
+/// Sheet on iPhone and in narrow iPad windows. Inspector beside the calendar on a regular iPad.
+private struct DayEditorPresentation: ViewModifier {
+    var usesInspector: Bool
+    @Binding var selection: JournalDaySelection?
+    @Binding var showInspector: Bool
+    var focusedDay: Date?
+    var fallbackCountry: String
+
+    func body(content: Content) -> some View {
+        if usesInspector {
+            content
+                .inspector(isPresented: $showInspector) {
+                    if let focusedDay {
+                        NavigationStack {
+                            DayDetailView(
+                                day: focusedDay,
+                                defaultFallbackCountry: fallbackCountry,
+                                onFinished: { showInspector = false }
+                            )
+                        }
+                        .id(JournalCalendar.dayKey(for: focusedDay))
+                    }
+                }
+                .inspectorColumnWidth(min: 380, ideal: 440, max: 520)
+        } else {
+            content.sheet(item: $selection) { sel in
+                NavigationStack {
+                    DayDetailView(day: sel.day, defaultFallbackCountry: fallbackCountry)
+                }
+            }
+        }
+    }
 }
 
 #Preview {

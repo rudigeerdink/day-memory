@@ -29,7 +29,10 @@ struct Day_MemoryTests {
             Trip.self,
             TripTicketImage.self,
         ])
-        let sourceContainer = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+        let sourceContainer = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)]
+        )
         let sourceContext = sourceContainer.mainContext
 
         let tzKey = JournalCalendar.timeZonePreferenceKey
@@ -89,7 +92,10 @@ struct Day_MemoryTests {
         #expect(exportedById[j2.id] == DayNonWorkingReason.publicHoliday.rawValue)
         #expect(exportedById[j3.id] == nil)
 
-        let restoreContainer = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+        let restoreContainer = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)]
+        )
         let restoreContext = restoreContainer.mainContext
         try DayMemoryBackupService.importData(data, modelContext: restoreContext)
         let all = try restoreContext.fetch(FetchDescriptor<JournalDay>(sortBy: [SortDescriptor(\.day)]))

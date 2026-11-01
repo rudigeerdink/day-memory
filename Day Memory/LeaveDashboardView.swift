@@ -29,82 +29,123 @@ struct LeaveDashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        Menu {
-                            Picker("Year", selection: $year) {
-                                ForEach(yearChoices, id: \.self) { y in
-                                    Text(String(y)).tag(y)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "calendar")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(String(year))
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                    .monospacedDigit()
-                                Image(systemName: "chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color(.systemBackground))
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                            }
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-
-                    Picker("Count scope", selection: $countScope) {
-                        ForEach(YearCountScope.allCases) { scope in
-                            Text(scope.title).tag(scope)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    scopeCaption
-
-                    if showsFutureEntriesHint {
-                        Text("Includes annual leave marked on future dates in \(String(year)).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if report.employerCards.isEmpty {
-                        ContentUnavailableView(
-                            "No employer periods",
-                            systemImage: "building.2",
-                            description: Text("Add employer periods and annual leave entitlement in Employers.")
-                        )
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
-                    } else {
-                        ForEach(report.employerCards) { card in
-                            employerLeaveCard(card)
-                        }
-                    }
+            scroll
+                .navigationTitle("Leave view")
+                .background(Color(.systemGroupedBackground))
+                .onAppear {
+                    countScope = YearCountScope.defaultForYear(year, calendar: calendar)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .onChange(of: year) { _, newYear in
+                    countScope = YearCountScope.defaultForYear(newYear, calendar: calendar)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var scroll: some View {
+        if DayMemoryLayout.isPad {
+            PadDashboardScroll { columns in
+                dashboard(columns: columns, capControls: true)
             }
-            .navigationTitle("Leave view")
-            .background(Color(.systemGroupedBackground))
-            .onAppear {
-                countScope = YearCountScope.defaultForYear(year, calendar: calendar)
+        } else {
+            ScrollView {
+                dashboard(columns: 1, capControls: false)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
             }
-            .onChange(of: year) { _, newYear in
-                countScope = YearCountScope.defaultForYear(newYear, calendar: calendar)
+        }
+    }
+
+    private func dashboard(columns: Int, capControls: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                yearMenu
+                Spacer(minLength: 0)
+            }
+
+            if capControls {
+                scopePicker
+                    .frame(maxWidth: 480, alignment: .leading)
+            } else {
+                scopePicker
+            }
+
+            scopeCaption
+
+            if showsFutureEntriesHint {
+                Text("Includes annual leave marked on future dates in \(String(year)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if report.employerCards.isEmpty {
+                ContentUnavailableView(
+                    "No employer periods",
+                    systemImage: "building.2",
+                    description: Text("Add employer periods and annual leave entitlement in Employers.")
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                leaveCards(columns: columns)
+            }
+        }
+    }
+
+    private var yearMenu: some View {
+        Menu {
+            Picker("Year", selection: $year) {
+                ForEach(yearChoices, id: \.self) { y in
+                    Text(String(y)).tag(y)
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(String(year))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+        }
+    }
+
+    private var scopePicker: some View {
+        Picker("Count scope", selection: $countScope) {
+            ForEach(YearCountScope.allCases) { scope in
+                Text(scope.title).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder
+    private func leaveCards(columns: Int) -> some View {
+        if columns > 1 {
+            PadCardStack(columns: columns) {
+                ForEach(report.employerCards) { card in
+                    employerLeaveCard(card)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        } else {
+            ForEach(report.employerCards) { card in
+                employerLeaveCard(card)
             }
         }
     }
