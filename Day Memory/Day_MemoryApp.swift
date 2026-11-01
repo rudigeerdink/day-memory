@@ -23,6 +23,7 @@ struct Day_MemoryApp: App {
             PresenceSegment.self,
             Trip.self,
             TripTicketImage.self,
+            StayLimitRule.self,
         ])
         let configuration = ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)
         do {

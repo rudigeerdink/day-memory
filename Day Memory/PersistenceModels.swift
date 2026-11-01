@@ -116,6 +116,33 @@ final class Trip {
     }
 }
 
+/// One rolling presence limit: a country, how many days are allowed, and the length of each window.
+@Model
+final class StayLimitRule {
+    var id: UUID = UUID()
+    var countryCode: String = ""
+    var allowedDays: Int = 90
+    var periodDays: Int = 180
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        countryCode: String,
+        allowedDays: Int,
+        periodDays: Int,
+        sortOrder: Int = 0,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.countryCode = countryCode.uppercased()
+        self.allowedDays = allowedDays
+        self.periodDays = periodDays
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+    }
+}
+
 @Model
 final class TripTicketImage {
     var id: UUID = UUID()

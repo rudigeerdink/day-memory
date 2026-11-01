@@ -26,7 +26,7 @@ enum DayMemoryBackupError: LocalizedError {
 @MainActor
 enum DayMemoryBackupService {
     static let iCloudBackupFileName = "DayMemory-backup.json"
-    static let formatVersion = 3
+    static let formatVersion = 4
 
     private static var jsonEncoder: JSONEncoder {
         let e = JSONEncoder()
@@ -94,11 +94,28 @@ enum DayMemoryBackupService {
             )
         }
 
+        let stayRules = try modelContext.fetch(FetchDescriptor<StayLimitRule>())
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                return lhs.createdAt < rhs.createdAt
+            }
+            .map { rule in
+                DayMemoryBackupStayRule(
+                    id: rule.id,
+                    countryCode: rule.countryCode,
+                    allowedDays: rule.allowedDays,
+                    periodDays: rule.periodDays,
+                    sortOrder: rule.sortOrder,
+                    createdAt: rule.createdAt
+                )
+            }
+
         let envelope = DayMemoryBackupEnvelope(
             formatVersion: formatVersion,
             exportedAt: Date(),
             employers: employers,
-            journalDays: journalDays
+            journalDays: journalDays,
+            stayRules: stayRules
         )
 
         return try jsonEncoder.encode(envelope)
@@ -183,6 +200,18 @@ enum DayMemoryBackupService {
             }
         }
 
+        for rule in envelope.stayRules {
+            let stored = StayLimitRule(
+                id: rule.id,
+                countryCode: rule.countryCode,
+                allowedDays: rule.allowedDays,
+                periodDays: rule.periodDays,
+                sortOrder: rule.sortOrder,
+                createdAt: rule.createdAt
+            )
+            modelContext.insert(stored)
+        }
+
         try modelContext.save()
     }
 
@@ -199,6 +228,9 @@ enum DayMemoryBackupService {
             modelContext.delete(item)
         }
         for item in try modelContext.fetch(FetchDescriptor<EmployerPeriod>()) {
+            modelContext.delete(item)
+        }
+        for item in try modelContext.fetch(FetchDescriptor<StayLimitRule>()) {
             modelContext.delete(item)
         }
         try modelContext.save()

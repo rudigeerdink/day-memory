@@ -63,6 +63,8 @@ struct YearOverviewView: View {
 
     private func dashboard(columns: Int, capControls: Bool) -> some View {
         VStack(alignment: .leading, spacing: 18) {
+            StayLimitsSection()
+
             HStack {
                 yearMenu
                 Spacer(minLength: 0)
@@ -420,7 +422,7 @@ private struct PresenceRing: View {
 #Preview {
     YearOverviewView()
         .modelContainer(
-            for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self],
+            for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self, StayLimitRule.self],
             inMemory: true
         )
 }

@@ -243,7 +243,7 @@ struct BackupSettingsView: View {
 #Preview {
     BackupSettingsView()
         .modelContainer(
-            for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self],
+            for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self, StayLimitRule.self],
             inMemory: true
         )
 }

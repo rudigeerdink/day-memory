@@ -395,7 +395,7 @@ struct DayDetailView: View {
         DayDetailView(day: .now, defaultFallbackCountry: "NL")
     }
     .modelContainer(
-        for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self],
+        for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self, StayLimitRule.self],
         inMemory: true
     )
 }

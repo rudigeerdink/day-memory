@@ -28,6 +28,7 @@ struct Day_MemoryTests {
             PresenceSegment.self,
             Trip.self,
             TripTicketImage.self,
+            StayLimitRule.self,
         ])
         let sourceContainer = try ModelContainer(
             for: schema,
@@ -357,5 +358,286 @@ struct LeaveMonthBarScaleTests {
     @Test func emptyOrZeroMonthsHaveNoScale() {
         #expect(LeaveMonthBarScale.scale(for: []) == 0)
         #expect(LeaveMonthBarScale.widthRatio(value: 2.5, scale: 0) == 0)
+    }
+}
+
+struct StayLimitEvaluatorTests {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    @Test func windowStepsBackAcrossMonths() {
+        let shifted = StayLimitEvaluator.dayKey(byAdding: -179, to: "2026-11-01", calendar: calendar)
+        #expect(shifted == "2026-05-06")
+    }
+
+    @Test func splitDayCountsOnceForEachCountry() {
+        let days = [
+            StayJournalDay(dayKey: "2026-11-01", countryCodes: ["NL", "AE", "nl"]),
+        ]
+        let netherlands = StayLimitEvaluator.evaluate(
+            countryCode: "nl",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        let emirates = StayLimitEvaluator.evaluate(
+            countryCode: "AE",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        #expect(netherlands.usedInCurrentWindow == 1)
+        #expect(emirates.usedInCurrentWindow == 1)
+        #expect(netherlands.todayStatus == .inCountry)
+    }
+
+    @Test func netherlandsStayOutlastsTheRoomLeftToday() {
+        let days = journal(
+            presence: [
+                ("2026-04-10", "2026-06-08"),
+                ("2026-10-18", "2026-12-20"),
+                ("2027-02-02", "2027-03-20"),
+            ],
+            country: "NL",
+            loggedFrom: "2026-04-10",
+            loggedThrough: "2027-03-20"
+        )
+        let report = StayLimitEvaluator.evaluate(
+            countryCode: "NL",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        #expect(report.todayStatus == .inCountry)
+        #expect(report.usedInCurrentWindow == 49)
+        #expect(report.windowStartKey == "2026-05-06")
+        #expect(report.roomInCurrentWindow == 41)
+        #expect(report.unloggedDaysInCurrentWindow == 0)
+        #expect(report.runway == .stayUntil(lastDayKey: "2027-01-15", furtherDays: 75))
+        let breach = report.breaches.first
+        #expect(breach?.firstDayKey == "2027-02-28")
+        #expect(breach?.count == 91)
+        #expect(breach?.peakDayKey == "2027-03-20")
+        #expect(breach?.peakCount == 111)
+        #expect(breach?.lastSafeDayKey == "2027-02-27")
+    }
+
+    @Test func uaeStayMatchesTheRoomLeftToday() {
+        let days = journal(
+            presence: [
+                ("2026-09-01", "2026-09-20"),
+                ("2026-10-05", "2026-10-17"),
+                ("2027-01-04", "2027-01-25"),
+            ],
+            country: "AE",
+            loggedFrom: "2026-09-01",
+            loggedThrough: "2027-01-25"
+        )
+        let report = StayLimitEvaluator.evaluate(
+            countryCode: "AE",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        #expect(report.todayStatus == .outside)
+        #expect(report.usedInCurrentWindow == 33)
+        #expect(report.runway == .enterUntil(lastDayKey: "2026-12-27", stayDays: 57))
+        #expect(report.breaches.isEmpty)
+        #expect(report.hasUpcomingPresence)
+        #expect(report.upcomingPeak == 55)
+    }
+
+    @Test func fullAllowanceMakesTodayTheLastDay() {
+        let days = journal(
+            presence: [("2026-08-04", "2026-11-01")],
+            country: "NL",
+            loggedFrom: "2026-08-04",
+            loggedThrough: "2026-11-01"
+        )
+        let report = StayLimitEvaluator.evaluate(
+            countryCode: "NL",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        #expect(report.usedInCurrentWindow == 90)
+        #expect(report.runway == .stayUntil(lastDayKey: "2026-11-01", furtherDays: 0))
+    }
+
+    @Test func windowAlreadyFullRefusesEntryToday() {
+        var days = journal(
+            presence: [("2026-08-03", "2026-10-31")],
+            country: "NL",
+            loggedFrom: "2026-08-03",
+            loggedThrough: "2026-10-31"
+        )
+        days.append(StayJournalDay(dayKey: "2026-11-01", countryCodes: ["AE"]))
+        let report = StayLimitEvaluator.evaluate(
+            countryCode: "NL",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        #expect(report.todayStatus == .outside)
+        #expect(report.usedInCurrentWindow == 90)
+        #expect(report.runway == .cannotEnter)
+    }
+
+    @Test func currentWindowAlreadyOver() {
+        let days = journal(
+            presence: [("2026-08-03", "2026-11-01")],
+            country: "NL",
+            loggedFrom: "2026-08-03",
+            loggedThrough: "2026-11-01"
+        )
+        let report = StayLimitEvaluator.evaluate(
+            countryCode: "NL",
+            allowedDays: 90,
+            periodDays: 180,
+            days: days,
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        // 3 Aug through 1 Nov is 91 days.
+        #expect(report.usedInCurrentWindow == 91)
+        #expect(report.runway == .alreadyOver(daysOver: 1))
+    }
+
+    @Test func missingDaysInTheWindowAreCounted() {
+        let report = StayLimitEvaluator.evaluate(
+            countryCode: "NL",
+            allowedDays: 90,
+            periodDays: 180,
+            days: [StayJournalDay(dayKey: "2026-11-01", countryCodes: ["NL"])],
+            todayKey: "2026-11-01",
+            calendar: calendar
+        )
+        #expect(report.usedInCurrentWindow == 1)
+        #expect(report.unloggedDaysInCurrentWindow == 179)
+        #expect(report.todayStatus == .inCountry)
+    }
+
+    @Test func identicalRuleIsRefused() {
+        let existing = [StayRuleIdentity(countryCode: "ae", allowedDays: 90, periodDays: 180)]
+        #expect(
+            StayLimitEvaluator.clashes(
+                StayRuleIdentity(countryCode: "AE", allowedDays: 90, periodDays: 180),
+                with: existing
+            )
+        )
+        #expect(
+            !StayLimitEvaluator.clashes(
+                StayRuleIdentity(countryCode: "AE", allowedDays: 180, periodDays: 365),
+                with: existing
+            )
+        )
+    }
+
+    private func journal(
+        presence: [(String, String)],
+        country: String,
+        loggedFrom: String,
+        loggedThrough: String
+    ) -> [StayJournalDay] {
+        let presenceKeys = Set(presence.flatMap { keys(from: $0.0, through: $0.1) })
+        return keys(from: loggedFrom, through: loggedThrough).map { key in
+            StayJournalDay(
+                dayKey: key,
+                countryCodes: presenceKeys.contains(key) ? [country] : ["ZZ"]
+            )
+        }
+    }
+
+    private func keys(from start: String, through end: String) -> [String] {
+        guard let first = StayLimitEvaluator.date(forDayKey: start, calendar: calendar),
+              let last = StayLimitEvaluator.date(forDayKey: end, calendar: calendar),
+              first <= last else { return [] }
+        var result: [String] = []
+        var day = first
+        while day <= last {
+            result.append(StayLimitEvaluator.dayKey(for: day, calendar: calendar))
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = calendar.startOfDay(for: next)
+        }
+        return result
+    }
+}
+
+struct StayLimitBackupTests {
+    @MainActor
+    @Test func olderBackupWithoutStayRulesStillImports() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let json = #"{"employers":[],"exportedAt":"2026-01-01T00:00:00Z","formatVersion":3,"journalDays":[]}"#
+        try DayMemoryBackupService.importData(Data(json.utf8), modelContext: context)
+        let rules = try context.fetch(FetchDescriptor<StayLimitRule>())
+        #expect(rules.isEmpty)
+    }
+
+    @MainActor
+    @Test func stayRuleRoundTrips() throws {
+        let sourceContainer = try makeContainer()
+        let source = sourceContainer.mainContext
+        let created = ISO8601DateFormatter().date(from: "2026-11-01T00:00:00Z")!
+        let rule = StayLimitRule(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            countryCode: "ae",
+            allowedDays: 90,
+            periodDays: 180,
+            sortOrder: 2,
+            createdAt: created
+        )
+        source.insert(rule)
+        try source.save()
+
+        let data = try DayMemoryBackupService.exportData(modelContext: source)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(DayMemoryBackupEnvelope.self, from: data)
+        #expect(envelope.formatVersion == 4)
+        #expect(envelope.stayRules.count == 1)
+        #expect(envelope.stayRules[0].countryCode == "AE")
+
+        let restoredContainer = try makeContainer()
+        let restored = restoredContainer.mainContext
+        try DayMemoryBackupService.importData(data, modelContext: restored)
+        let rules = try restored.fetch(FetchDescriptor<StayLimitRule>())
+        #expect(rules.count == 1)
+        #expect(rules[0].countryCode == "AE")
+        #expect(rules[0].allowedDays == 90)
+        #expect(rules[0].periodDays == 180)
+        #expect(rules[0].sortOrder == 2)
+        #expect(rules[0].id == rule.id)
+    }
+
+    @MainActor
+    private func makeContainer() throws -> ModelContainer {
+        let schema = Schema([
+            EmployerPeriod.self,
+            JournalDay.self,
+            PresenceSegment.self,
+            Trip.self,
+            TripTicketImage.self,
+            StayLimitRule.self,
+        ])
+        return try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)]
+        )
     }
 }

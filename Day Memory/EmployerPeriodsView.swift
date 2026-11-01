@@ -309,7 +309,7 @@ struct EmployerPeriodForm: View {
 #Preview {
     EmployerPeriodsView()
         .modelContainer(
-            for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self],
+            for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self, StayLimitRule.self],
             inMemory: true
         )
 }
