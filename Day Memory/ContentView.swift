@@ -48,8 +48,8 @@ struct ContentView: View {
             LeaveDashboardView()
                 .tabItem { Label("Leave view", systemImage: "chart.bar.doc.horizontal") }
 
-            EmployerPeriodsView()
-                .tabItem { Label("Employers", systemImage: "building.2") }
+            StayLimitsView()
+                .tabItem { Label("Stay limits", systemImage: "hourglass") }
 
             BackupSettingsView()
                 .tabItem { Label("Manage", systemImage: "gearshape.2") }
@@ -61,7 +61,7 @@ private enum PadSection: String, Hashable, Identifiable {
     case journal
     case work
     case leave
-    case employers
+    case stayLimits
     case manage
 
     var id: String { rawValue }
@@ -71,7 +71,7 @@ private enum PadSection: String, Hashable, Identifiable {
         case .journal: "Journal"
         case .work: "Work view"
         case .leave: "Leave view"
-        case .employers: "Employers"
+        case .stayLimits: "Stay limits"
         case .manage: "Manage"
         }
     }
@@ -81,8 +81,8 @@ private enum PadSection: String, Hashable, Identifiable {
         case .journal: "Days, travel, and tickets"
         case .work: "Presence by country"
         case .leave: "Entitlement and use"
-        case .employers: "Who paid you, and when"
-        case .manage: "Backup and reports"
+        case .stayLimits: "Rolling days in a country"
+        case .manage: "Backup, reports, and employers"
         }
     }
 
@@ -91,7 +91,7 @@ private enum PadSection: String, Hashable, Identifiable {
         case .journal: "calendar"
         case .work: "chart.pie"
         case .leave: "chart.bar.doc.horizontal"
-        case .employers: "building.2"
+        case .stayLimits: "hourglass"
         case .manage: "gearshape.2"
         }
     }
@@ -111,10 +111,10 @@ private struct PadSidebarRoot: View {
                 Section("Summaries") {
                     sidebarRow(.work)
                     sidebarRow(.leave)
+                    sidebarRow(.stayLimits)
                 }
 
                 Section("Setup") {
-                    sidebarRow(.employers)
                     sidebarRow(.manage)
                 }
             }
@@ -170,8 +170,8 @@ private struct PadSidebarRoot: View {
             YearOverviewView()
         case .leave:
             LeaveDashboardView()
-        case .employers:
-            EmployerPeriodsView()
+        case .stayLimits:
+            StayLimitsView()
         case .manage:
             BackupSettingsView()
         }

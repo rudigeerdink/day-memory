@@ -82,7 +82,7 @@ struct LeaveDashboardView: View {
                 ContentUnavailableView(
                     "No employer periods",
                     systemImage: "building.2",
-                    description: Text("Add employer periods and annual leave entitlement in Employers.")
+                    description: Text("Add employer periods and annual leave entitlement in Manage.")
                 )
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)

@@ -626,6 +626,99 @@ struct StayLimitBackupTests {
     }
 
     @MainActor
+    @Test func importReplacesStayRulesAndKeepsJournalDays() throws {
+        let sourceContainer = try makeContainer()
+        let source = sourceContainer.mainContext
+        let day = JournalDay(day: Date(timeIntervalSince1970: 1_762_000_000), dayKey: "2026-11-01")
+        let segment = PresenceSegment(countryCode: "NL", isWorking: true, sortOrder: 0, journalDay: day)
+        day.segments = [segment]
+        source.insert(day)
+        source.insert(segment)
+        source.insert(StayLimitRule(countryCode: "NL", allowedDays: 90, periodDays: 180, sortOrder: 0))
+        source.insert(StayLimitRule(countryCode: "AE", allowedDays: 90, periodDays: 180, sortOrder: 1))
+        try source.save()
+
+        let data = try DayMemoryBackupService.exportData(modelContext: source)
+
+        let restoredContainer = try makeContainer()
+        let restored = restoredContainer.mainContext
+        restored.insert(StayLimitRule(countryCode: "FR", allowedDays: 30, periodDays: 90, sortOrder: 4))
+        try restored.save()
+        try DayMemoryBackupService.importData(data, modelContext: restored)
+
+        let rules = try restored.fetch(FetchDescriptor<StayLimitRule>(sortBy: [SortDescriptor(\.sortOrder)]))
+        let days = try restored.fetch(FetchDescriptor<JournalDay>())
+        #expect(rules.map(\.countryCode) == ["NL", "AE"])
+        #expect(rules.map(\.allowedDays) == [90, 90])
+        #expect(rules.map(\.periodDays) == [180, 180])
+        #expect(days.count == 1)
+        #expect(days[0].dayKey == "2026-11-01")
+        #expect(days[0].orderedSegments.map(\.countryCode) == ["NL"])
+    }
+
+    @MainActor
+    @Test func olderBackupClearsStayRulesAddedSinceThatBackup() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        context.insert(StayLimitRule(countryCode: "AE", allowedDays: 90, periodDays: 180))
+        try context.save()
+
+        let json = #"{"employers":[],"exportedAt":"2026-01-01T00:00:00Z","formatVersion":3,"journalDays":[]}"#
+        try DayMemoryBackupService.importData(Data(json.utf8), modelContext: context)
+        let rules = try context.fetch(FetchDescriptor<StayLimitRule>())
+        #expect(rules.isEmpty)
+    }
+
+    @MainActor
+    @Test func cloudKitStoreCanSaveAndExportAStayRule() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("day-memory-stay-sync-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let schema = Schema([
+            EmployerPeriod.self,
+            JournalDay.self,
+            PresenceSegment.self,
+            Trip.self,
+            TripTicketImage.self,
+            StayLimitRule.self,
+        ])
+        let configuration = ModelConfiguration(
+            schema: schema,
+            url: directory.appendingPathComponent("DayMemory.store"),
+            cloudKitDatabase: .automatic
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let context = container.mainContext
+        let rule = StayLimitRule(
+            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            countryCode: "nl",
+            allowedDays: 90,
+            periodDays: 180,
+            sortOrder: 1
+        )
+        context.insert(rule)
+        try context.save()
+
+        let stored = try context.fetch(FetchDescriptor<StayLimitRule>())
+        #expect(stored.count == 1)
+        #expect(stored[0].countryCode == "NL")
+
+        let data = try DayMemoryBackupService.exportData(modelContext: context)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(DayMemoryBackupEnvelope.self, from: data)
+        #expect(envelope.stayRules.count == 1)
+        #expect(envelope.stayRules[0].countryCode == "NL")
+
+        context.delete(rule)
+        try context.save()
+        let remaining = try context.fetch(FetchDescriptor<StayLimitRule>())
+        #expect(remaining.isEmpty)
+    }
+
+    @MainActor
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             EmployerPeriod.self,

@@ -63,8 +63,6 @@ struct YearOverviewView: View {
 
     private func dashboard(columns: Int, capControls: Bool) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            StayLimitsSection()
-
             HStack {
                 yearMenu
                 Spacer(minLength: 0)
@@ -105,7 +103,7 @@ struct YearOverviewView: View {
                 ContentUnavailableView(
                     "No employer periods",
                     systemImage: "building.2",
-                    description: Text("Add periods under Employers. Only periods overlapping \(String(year)) are shown.")
+                    description: Text("Add periods in Manage. Only periods overlapping \(String(year)) are shown.")
                 )
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)

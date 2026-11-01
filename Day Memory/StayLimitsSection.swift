@@ -7,6 +7,21 @@ import Charts
 import SwiftData
 import SwiftUI
 
+struct StayLimitsView: View {
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                StayLimitsSection()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .padReadableColumn()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Stay limits")
+        }
+    }
+}
+
 struct StayLimitsSection: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \StayLimitRule.sortOrder) private var rules: [StayLimitRule]
@@ -17,29 +32,40 @@ struct StayLimitsSection: View {
     @State private var draftAllowed = 90
     @State private var draftPeriod = 180
     @State private var showDuplicate = false
+    @State private var pendingDelete: StayLimitRule?
 
     private let cardBackground = Color(.secondarySystemGroupedBackground)
     private let navy = Color(red: 0.07, green: 0.24, blue: 0.50)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Stay limits")
-                .font(.title3.weight(.semibold))
-                .padding(.top, 2)
-
             VStack(alignment: .leading, spacing: 0) {
                 if rules.isEmpty {
                     form
                         .padding(16)
                 } else {
                     ForEach(rules) { rule in
-                        NavigationLink {
-                            StayLimitDetailView(rule: rule)
-                        } label: {
-                            ruleSummary(rule)
-                                .padding(16)
+                        VStack(alignment: .leading, spacing: 0) {
+                            NavigationLink {
+                                StayLimitDetailView(rule: rule)
+                            } label: {
+                                ruleSummary(rule)
+                                    .padding(16)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                pendingDelete = rule
+                            } label: {
+                                Text("Delete rule")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(navy)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Delete \(CountryDisplay.name(for: rule.countryCode))")
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 14)
                         }
-                        .buttonStyle(.plain)
                         Divider()
                             .padding(.leading, 16)
                     }
@@ -59,16 +85,34 @@ struct StayLimitsSection: View {
         } message: {
             Text("This country is already tracked for these days and this period.")
         }
+        .confirmationDialog(
+            "Delete this rule?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { rule in
+            Button("Delete", role: .destructive) {
+                modelContext.delete(rule)
+                try? modelContext.save()
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { rule in
+            Text("\(CountryDisplay.name(for: rule.countryCode)), \(rulePhrase(allowed: rule.allowedDays, period: rule.periodDays)).")
+        }
     }
 
     private var form: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if rules.isEmpty {
-                Text("Track a country for a set number of days in each rolling period.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add a rule")
+                .font(.headline)
+            Text("A rule names the country, how many days you may spend there, and the length of the period those days are counted in.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             CountryPicker(
                 title: "Country",
@@ -81,8 +125,13 @@ struct StayLimitsSection: View {
             )
 
             Stepper(value: $draftAllowed, in: 1...max(draftPeriod, 1)) {
-                Text("\(draftAllowed) days")
-                    .monospacedDigit()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Allowed days")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(draftAllowed)")
+                        .monospacedDigit()
+                }
             }
             .onChange(of: draftPeriod) { _, newValue in
                 if draftAllowed > newValue {
@@ -91,9 +140,18 @@ struct StayLimitsSection: View {
             }
 
             Stepper(value: $draftPeriod, in: 1...1095) {
-                Text("in every \(draftPeriod) days")
-                    .monospacedDigit()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Period length")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(draftPeriod) days")
+                        .monospacedDigit()
+                }
             }
+
+            Text(rulePhrase(allowed: draftAllowed, period: draftPeriod))
+                .font(.subheadline.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
 
             Button("Add rule") {
                 addRule()
@@ -234,6 +292,8 @@ struct StayLimitDetailView: View {
         let report = currentReport
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                Text(CountryDisplay.name(for: rule.countryCode))
+                    .font(.title2.weight(.semibold))
                 Text(rulePhrase(allowed: rule.allowedDays, period: rule.periodDays))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -269,7 +329,7 @@ struct StayLimitDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(CountryDisplay.name(for: rule.countryCode))
+        .navigationTitle("Summary view")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -301,9 +361,17 @@ struct StayLimitDetailView: View {
                             including: draftCountry
                         )
                     )
+                    Text("A rule names the country, how many days you may spend there, and the length of the period those days are counted in.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Stepper(value: $draftAllowed, in: 1...max(draftPeriod, 1)) {
-                        Text("\(draftAllowed) days")
-                            .monospacedDigit()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Allowed days")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(draftAllowed)")
+                                .monospacedDigit()
+                        }
                     }
                     .onChange(of: draftPeriod) { _, newValue in
                         if draftAllowed > newValue {
@@ -311,9 +379,16 @@ struct StayLimitDetailView: View {
                         }
                     }
                     Stepper(value: $draftPeriod, in: 1...1095) {
-                        Text("in every \(draftPeriod) days")
-                            .monospacedDigit()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Period length")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(draftPeriod) days")
+                                .monospacedDigit()
+                        }
                     }
+                    Text(rulePhrase(allowed: draftAllowed, period: draftPeriod))
+                        .font(.subheadline.weight(.medium))
                 }
                 .navigationTitle("Edit rule")
                 .navigationBarTitleDisplayMode(.inline)
@@ -398,36 +473,55 @@ struct StayLimitDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Schedule already filled")
                 .font(.headline)
+            Text("This checks every day in \(CountryDisplay.name(for: report.countryCode)) that is already in the journal, including dates after today. A day breaks the rule when the period ending on that day holds more days than the limit allows.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if report.breaches.isEmpty {
                 Text(planCaption(report))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if report.breaches.count == 1, let breach = report.breaches.first {
+                breachDetail(breach)
             } else {
-                ForEach(report.breaches.prefix(3)) { breach in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Over from \(medium(breach.firstDayKey)), peak \(breach.peakCount).")
+                ForEach(report.breaches) { breach in
+                    DisclosureGroup {
+                        breachDetail(breach)
+                            .padding(.top, 4)
+                    } label: {
+                        Text("Over the limit from \(medium(breach.firstDayKey)), \(breach.count) days")
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.red)
-                        if let safe = breach.lastSafeDayKey {
-                            Text("Leaving by \(medium(safe)) stays inside the limit.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("This stay is over the limit from the day it starts.")
-                                .foregroundStyle(.secondary)
-                        }
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }
-                if report.breaches.count > 3 {
-                    Text("\(report.breaches.count - 3) more stays are also over the limit.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
     }
 
     @ViewBuilder
+    private func breachDetail(_ breach: StayBreach) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("The period ending \(medium(breach.firstDayKey)) holds \(breach.count) days, which is over the limit. The fullest period in that stay holds \(breach.peakCount) days on \(medium(breach.peakDayKey)).")
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+            if let safe = breach.lastSafeDayKey {
+                Text("The last day of that stay still inside the limit is \(medium(safe)).")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("That stay is over the limit from its first day.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.subheadline)
+    }
+
+    @ViewBuilder
     private func chartSection(_ report: StayLimitReport) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Days in each \(report.periodDays)-day window")
+            Text("Days in every \(report.periodDays) day period")
                 .font(.headline)
             if report.chart.isEmpty {
                 Text("No days logged in \(CountryDisplay.name(for: report.countryCode)).")
@@ -437,8 +531,8 @@ struct StayLimitDetailView: View {
                 Chart {
                     ForEach(points) { point in
                         LineMark(
-                            x: .value("Window ending", point.date),
-                            y: .value("Days in the window", point.days)
+                            x: .value("Date the period ends", point.date),
+                            y: .value("Days in the country", point.days)
                         )
                         .interpolationMethod(.linear)
                         .foregroundStyle(navy)
@@ -456,9 +550,11 @@ struct StayLimitDetailView: View {
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 4))
                 }
+                .chartXAxisLabel("Date the period ends")
+                .chartYAxisLabel("Days in the country")
                 .frame(height: 220)
-                .accessibilityLabel("Days in each \(report.periodDays) day window. Limit \(report.allowedDays).")
-                Text("Each point is the number of days in \(CountryDisplay.name(for: report.countryCode)) during the \(report.periodDays) days ending on that date, including days already filled in ahead.")
+                .accessibilityLabel("Days in every \(report.periodDays) day period. The limit line is \(report.allowedDays).")
+                Text("Read across the dates. Each point is the period that ends on that date, and its height is how many of those days were spent in \(CountryDisplay.name(for: report.countryCode)). The dashed line is the limit of \(report.allowedDays). A point above the line means that period is over the limit. Dates after today follow the days already filled in the journal.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -509,7 +605,9 @@ private struct StayUsageBar: View {
 }
 
 private func rulePhrase(allowed: Int, period: Int) -> String {
-    "\(allowed) days in every \(period)"
+    let allowedText = allowed == 1 ? "1 day" : "\(allowed) days"
+    let periodText = period == 1 ? "1 day" : "\(period) day"
+    return "\(allowedText) in every consecutive \(periodText) period"
 }
 
 private func headline(_ report: StayLimitReport) -> String {
@@ -560,12 +658,12 @@ private func subtitle(_ report: StayLimitReport) -> String? {
 
 private func planCaption(_ report: StayLimitReport) -> String {
     if let breach = report.breaches.first {
-        return "Over from \(medium(breach.firstDayKey)), peak \(breach.peakCount)."
+        return "A day already in the journal breaks this rule on \(medium(breach.firstDayKey)). The period ending then holds \(breach.count) days."
     }
     if report.hasUpcomingPresence, let peak = report.upcomingPeak {
-        return "Filled days stay inside the limit, peak \(peak)."
+        return "Days already entered for later dates stay inside the limit. The fullest of those periods holds \(peak) days."
     }
-    return "No further days in this country are filled in."
+    return "No later days in this country are entered in the journal yet."
 }
 
 private func gapCaption(_ count: Int) -> String {

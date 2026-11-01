@@ -27,9 +27,7 @@ struct EmployerPeriodsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            editorContainer
-        }
+        editorContainer
     }
 
     private var editorContainer: some View {
@@ -307,7 +305,9 @@ struct EmployerPeriodForm: View {
 }
 
 #Preview {
-    EmployerPeriodsView()
+    NavigationStack {
+        EmployerPeriodsView()
+    }
         .modelContainer(
             for: [EmployerPeriod.self, JournalDay.self, PresenceSegment.self, Trip.self, TripTicketImage.self, StayLimitRule.self],
             inMemory: true

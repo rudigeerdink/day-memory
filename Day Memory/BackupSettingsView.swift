@@ -40,6 +40,18 @@ struct BackupSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Employers") {
+                    NavigationLink {
+                        EmployerPeriodsView()
+                    } label: {
+                        Label("Employer periods…", systemImage: "building.2")
+                    }
+
+                    Text("Who paid you, and when. Periods cannot overlap.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Reports") {
                     NavigationLink {
                         YearPresenceReportView()
